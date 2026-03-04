@@ -1,0 +1,13 @@
+{
+  "name": "horas-extras-v2",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "start:py": "python -m http.server 3000 --directory .",
+    "build": "echo \"Sin bundler — archivos servidos directamente desde src/\"",
+    "test:smoke": "node tests/smoke.test.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
