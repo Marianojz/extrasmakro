@@ -1,6 +1,6 @@
 {
   "cleanUrls": true,
-  "routes": [
-    { "src": "/", "dest": "/public/index.html" }
+  "rewrites": [
+    { "source": "/", "destination": "/public/index.html" }
   ]
 }
