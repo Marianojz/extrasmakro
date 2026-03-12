@@ -50,6 +50,14 @@ async function load() {
     }
   }
 
+  // Firebase drops empty arrays — normalize personal on every nightShiftEvent
+  if (state.nightShiftEvents) {
+    for (const key of Object.keys(state.nightShiftEvents)) {
+      const ev = state.nightShiftEvents[key];
+      if (ev) ev.personal = Array.isArray(ev.personal) ? ev.personal : [];
+    }
+  }
+
   return state;
 }
 
