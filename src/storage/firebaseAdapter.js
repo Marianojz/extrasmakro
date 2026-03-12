@@ -81,4 +81,12 @@ async function removeData(path) {
   await remove(ref(db, path));
 }
 
-export default { load, save, updateData, removeData };
+/**
+ * Eliminar todos los datos (usar solo en desarrollo).
+ * @returns {Promise<void>}
+ */
+async function reset() {
+  await remove(ref(db, "/"));
+}
+
+export default { load, save, reset, updateData, removeData };
