@@ -1,4 +1,5 @@
 import { firebaseConfig } from "../firebaseConfig.js";
+import { INITIAL_STATE } from "./adapter.js";
 
 const {
   initializeApp,
@@ -24,27 +25,32 @@ const db = getDatabase(app);
  */
 async function load() {
   const snapshot = await get(ref(db, "/"));
-  if (!snapshot.exists()) {
-    return {
-      systemConfig: { currentShiftWeek: "mañana" },
-      employees: {},
-      employeesList: [],
-      callEvents: {},
-      saturdayEvents: {},
-      auditLogs: [],
-      nextIdCounter: 0
-    };
-  }
-  const data = snapshot.val();
-  return {
-    systemConfig: data.systemConfig ?? { currentShiftWeek: "mañana" },
-    employees: data.employees ?? {},
-    employeesList: data.employeesList ?? [],
-    callEvents: data.callEvents ?? {},
-    saturdayEvents: data.saturdayEvents ?? {},
-    auditLogs: data.auditLogs ?? [],
-    nextIdCounter: data.nextIdCounter ?? 0
+  const data = snapshot.exists() ? snapshot.val() : {};
+
+  // Merge over INITIAL_STATE so all keys are always present
+  const state = { ...INITIAL_STATE, ...data };
+
+  // Ensure nested defaults
+  state.systemConfig = { ...INITIAL_STATE.systemConfig, ...(data.systemConfig ?? {}) };
+  state.saturdayData = {
+    ...INITIAL_STATE.saturdayData,
+    ...(data.saturdayData ?? {}),
+    employees: (data.saturdayData?.employees ?? {}),
+    events: (data.saturdayData?.events ?? []),
+    config: { ...INITIAL_STATE.saturdayData.config, ...(data.saturdayData?.config ?? {}) },
   };
+  state.employees = data.employees ?? {};
+  state.employeesList = data.employeesList ?? [];
+
+  // Firebase drops empty arrays — normalize incidents on every employee
+  for (const id of state.employeesList) {
+    const emp = state.employees[id];
+    if (emp) {
+      emp.incidents = Array.isArray(emp.incidents) ? emp.incidents : [];
+    }
+  }
+
+  return state;
 }
 
 /**
