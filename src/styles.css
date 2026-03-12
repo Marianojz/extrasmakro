@@ -832,11 +832,22 @@ body { background: #f4f6f8; font-family: Inter, ui-sans-serif, system-ui, -apple
   .tab-sections { padding: 14px 12px; }
   .alert-bar    { padding: 0 12px; margin-top: 8px; }
 
-  /* Header */
+  /* Header — simplify on narrow screens */
   .app-logo-img  { height: 28px; }
   .app-title     { font-size: 14.5px; }
-  .app-op        { display: none; }
-  .shift-badge   { font-size: 10.5px; padding: 3px 9px; }
+  .app-op        { display: none !important; }
+  .app-subtitle  { display: none !important; }
+  .celsur-header .app-brand-text .app-op     { display: none !important; }
+  .celsur-header .app-brand-text .app-subtitle { display: none !important; }
+  .view-toggle-btn { display: none !important; }
+  #app-version   { display: none !important; }
+  .shift-badge   { font-size: 10.5px; padding: 3px 9px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Navigation — force bottom nav on small screens regardless of JS mode */
+  .nav-tabs { display: none !important; }
+  .mobile-bottom-nav { display: block !important; }
+  #app { padding-bottom: 78px; }
+  .toast-container { bottom: 78px; }
 
   /* Nav */
   .nav-tab { padding: 11px 14px; font-size: 12.5px; }

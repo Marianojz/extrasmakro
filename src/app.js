@@ -242,13 +242,23 @@ function toggleMobileMode() { setMobileMode(!mobileMode); }
 function initMobileMode() {
   const pref = localStorage.getItem('uiPreference');
   let useMobile;
-  if (pref === 'mobile')        useMobile = true;
-  else if (pref === 'desktop')  useMobile = false;
-  else                          useMobile = window.innerWidth < 768;
+  // Si hay preferencia guardada 'desktop' pero la pantalla es pequeña, ignorarla
+  // (el usuario puede forzar escritorio solo en pantallas anchas ≥ 641px)
+  if (pref === 'mobile') {
+    useMobile = true;
+  } else if (pref === 'desktop' && window.innerWidth >= 641) {
+    useMobile = false;
+  } else {
+    useMobile = window.innerWidth < 768;
+  }
   setMobileMode(useMobile);
-  // Detectar cambios de tamaño solo si no hay preferencia manual guardada
+  // Detectar cambios de tamaño: en pantallas pequeñas siempre forzar mobile
   window.addEventListener('resize', () => {
-    if (!localStorage.getItem('uiPreference')) setMobileMode(window.innerWidth < 768);
+    if (window.innerWidth <= 640) {
+      setMobileMode(true);
+    } else if (!localStorage.getItem('uiPreference')) {
+      setMobileMode(window.innerWidth < 768);
+    }
   });
 }
 
@@ -3376,6 +3386,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     startupAlerts.push({ type: 'danger', msg: `⚠️ ${deactivated.length} empleado(s) desactivado(s) por fin de contrato: ${namesStr}. Verificá en la pestaña Empleados.` });
   }
   await mountUI();
+  initMobileMode();  // inicializar modo antes del resto para que la clase esté activa
   renderAlertBar();
   // initialize sticky header behavior after UI mounted
   try { initStickyHeader(); console.log('HEADER STICKY ACTIVADO'); } catch (e) { console.error("UI Error:", e); }
@@ -3384,7 +3395,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Mensajes solicitados (tienen visibilidad operativa reducida como toasts)
   debugLog("FASE 3C PREPARACIÓN ASYNC COMPLETA");
   debugLog("MODULO SABADO v1.2 IMPLEMENTADO");
-  initMobileMode();
   debugLog("MODO MOVIL v1.0 IMPLEMENTADO");
   try { toast('MODO MOVIL OPTIMIZADO REAL', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
   // Branding confirmation (discrete)
