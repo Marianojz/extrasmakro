@@ -3352,7 +3352,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (APP_CONFIG.FIREBASE_ENABLED) {
     try {
       const { default: store } = await import('./storage/index.js');
-      await store.load('systemConfig');
+      await store.load();
       console.log('Firebase connected successfully');
     } catch (e) {
       console.log('Firebase connection failed');

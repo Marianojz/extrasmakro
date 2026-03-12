@@ -19,23 +19,41 @@ const db = getDatabase(app);
  */
 
 /**
- * Leer datos desde una ruta específica.
- * @param {string} path
- * @returns {Promise<*>}
+ * Cargar estado completo desde Realtime Database.
+ * @returns {Promise<import('./adapter.js').AppState>}
  */
-async function load(path) {
-  const snapshot = await get(ref(db, path));
-  return snapshot.exists() ? snapshot.val() : null;
+async function load() {
+  const snapshot = await get(ref(db, "/"));
+  if (!snapshot.exists()) {
+    return {
+      systemConfig: { currentShiftWeek: "mañana" },
+      employees: {},
+      employeesList: [],
+      callEvents: {},
+      saturdayEvents: {},
+      auditLogs: [],
+      nextIdCounter: 0
+    };
+  }
+  const data = snapshot.val();
+  return {
+    systemConfig: data.systemConfig ?? { currentShiftWeek: "mañana" },
+    employees: data.employees ?? {},
+    employeesList: data.employeesList ?? [],
+    callEvents: data.callEvents ?? {},
+    saturdayEvents: data.saturdayEvents ?? {},
+    auditLogs: data.auditLogs ?? [],
+    nextIdCounter: data.nextIdCounter ?? 0
+  };
 }
 
 /**
- * Guardar datos en una ruta específica.
- * @param {string} path
- * @param {*} data
+ * Guardar estado completo en Realtime Database.
+ * @param {import('./adapter.js').AppState} state
  * @returns {Promise<void>}
  */
-async function save(path, data) {
-  await set(ref(db, path), data);
+async function save(state) {
+  await set(ref(db, "/"), state);
 }
 
 /**
