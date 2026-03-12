@@ -1,5 +1,7 @@
 {
   "cleanUrls": true,
+  "framework": null,
+  "outputDirectory": ".",
   "rewrites": [
     { "source": "/", "destination": "/public/index.html" }
   ]
