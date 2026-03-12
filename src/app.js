@@ -3348,6 +3348,17 @@ function doApplyMonthlyRecovery() {
 // --- Inicializacion ----------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Firebase connection check
+  if (APP_CONFIG.FIREBASE_ENABLED) {
+    try {
+      const { default: store } = await import('./storage/index.js');
+      await store.load('systemConfig');
+      console.log('Firebase connected successfully');
+    } catch (e) {
+      console.log('Firebase connection failed');
+    }
+  }
+
   const expiredDescargas = await Models.expireStaleDescargas();
   const deactivated = await Models.deactivateExpiredEventuals();
   await Models.purgeOldWeekAvailability();   // limpia semanas viejas (> 8 sem)

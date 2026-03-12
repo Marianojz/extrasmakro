@@ -12,7 +12,7 @@
 
 export const APP_CONFIG = {
   /** Poner en true cuando Firebase esté configurado y las deps instaladas */
-  FIREBASE_ENABLED: false,
+  FIREBASE_ENABLED: true,
 
   /** Clave de localStorage — incrementar si el esquema de datos cambia (fuerza migración) */
   STORAGE_KEY: 'horas_extras_v2_v1',

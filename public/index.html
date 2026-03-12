@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
           media="print" onload="this.media='all'" />
 
-    <link rel="stylesheet" href="../src/styles.css" />
+    <link rel="stylesheet" href="/src/styles.css" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   </head>
   <body>
@@ -31,8 +31,24 @@
       </div>
     </noscript>
 
+    <!-- Firebase CDN: expone módulos globalmente antes de cargar la app -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+      import { getDatabase, ref, set, get, update, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+      window.firebaseModules = {
+        initializeApp,
+        getDatabase,
+        ref,
+        set,
+        get,
+        update,
+        remove
+      };
+    </script>
+
     <!-- SheetJS: parseo de archivos XLS / XLSX -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-    <script type="module" src="../src/app.js"></script>
+    <script type="module" src="/src/app.js"></script>
   </body>
 </html>

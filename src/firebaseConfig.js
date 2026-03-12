@@ -1,16 +1,9 @@
-// Firebase configuration loaded from environment variables for security.
-// Provide values via process.env (see .env.example).
-
 export const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.FIREBASE_DATABASE_URL,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID
+  apiKey: "AIzaSyDg7rpRhE5PJKLltVVKv3VsAsVvd4mbFRg",
+  authDomain: "extrasmakro.firebaseapp.com",
+  databaseURL: "https://extrasmakro-default-rtdb.firebaseio.com",
+  projectId: "extrasmakro",
+  storageBucket: "extrasmakro.firebasestorage.app",
+  messagingSenderId: "328179671083",
+  appId: "1:328179671083:web:c7b0f71dfbe82f9bb58a6e"
 };
-
-// Ejemplo de uso:
-// import { initializeApp } from 'firebase/app';
-// const app = initializeApp(firebaseConfig);
