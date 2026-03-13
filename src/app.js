@@ -12,7 +12,7 @@
  */
 
 import api from './api/apiLayer.js';
-import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS } from './config.js';
+import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
 
@@ -207,7 +207,8 @@ function switchTab(tab) {
 
 let empPage = 1;
 let empSearch = '';
-let empPageSz = 10;
+let empPageSz = 25;
+let empTurnoFilter = '';
 let startupAlerts = []; // {type:'warning'|'danger', msg:string}
 let weekPlannerKey = null; // semana visible en el planificador (se inicializa on DOMContentLoaded)
 // Estado para Modo Móvil (UI only)
@@ -431,13 +432,20 @@ function buildTabEmpleados() {
       oninput: () => { empSearch = $id('emp-search').value.trim(); empPage = 1; renderEmployees(); }
     }),
     el('select', {
+      id: 'emp-turno-filter', class: 'select-sm',
+      onchange: () => { empTurnoFilter = $id('emp-turno-filter').value; empPage = 1; renderEmployees(); }
+    },
+      el('option', { value: '' }, 'Todos los turnos'),
+      el('option', { value: 'mañana' }, 'Turno mañana'),
+      el('option', { value: 'tarde' }, 'Turno tarde')
+    ),
+    el('select', {
       id: 'emp-page-size', class: 'select-sm',
       onchange: () => { empPageSz = parseInt($id('emp-page-size').value); empPage = 1; renderEmployees(); }
     },
-      el('option', { value: '5' }, '5'),
-      el('option', { value: '10', selected: '' }, '10'),
-      el('option', { value: '25' }, '25'),
-      el('option', { value: '50' }, '50')
+      el('option', { value: '25', selected: '' }, '25'),
+      el('option', { value: '50' }, '50'),
+      el('option', { value: '100' }, '100')
     ),
     el('button', { class: 'btn btn-primary', onclick: openAddEmployeeModal }, '+ Agregar empleado'),
     el('button', { class: 'btn btn-secondary', onclick: openImportCsvModal }, '⬆ Importar (CSV/XLS)')
@@ -465,9 +473,10 @@ async function renderEmployees() {
   for (const emp of all) { if (emp && emp.is_supervisor === undefined) emp.is_supervisor = false; }
   console.log('RENDER EMPLEADOS CORREGIDO — ARRAY NORMALIZADO');
   const q = empSearch.toLowerCase();
-  const filtered = q
+  let filtered = q
     ? all.filter(e => (e.name || '').toLowerCase().includes(q) || e.id.includes(q))
     : all;
+  if (empTurnoFilter) filtered = filtered.filter(e => e.turno_base === empTurnoFilter);
 
   if (!filtered.length) {
     cont.appendChild(el('div', { class: 'empty-state' }, 'No hay empleados coincidentes.'));
@@ -687,10 +696,11 @@ async function renderWeekPlanner() {
 
   const btnClear = el('button', {
     class: 'btn btn-danger btn-sm', onclick: () => {
-      confirmModal('¿Limpiar toda la planificación de esta semana?', () => {
+      confirmModal('¿Limpiar toda la planificación de esta semana?', async () => {
+        await Models.resetWeekAvailability(weekPlannerKey);
         editableMap = {};
-        dirty = true; btnSave.disabled = false; buildRows(allEmps);
-        toast('Planificación de la semana limpiada (pendiente de guardar).', 'info');
+        dirty = false; btnSave.disabled = true; buildRows(allEmps);
+        toast('Planificación de la semana limpiada y guardada.', 'success');
       });
     }
   }, '✗ Limpiar semana');
@@ -1606,7 +1616,10 @@ function buildTabTurnoNoche() {
           const v = $id('night-date').value; if (v) nightMgmtDate = v.replace(/-/g, '_'); renderNightShiftPanel(); }
         }),
         el('input', { id: 'night-sectores', type: 'text', class: 'input-sm', placeholder: 'Sectores (coma separada)' }),
-        el('select', { id: 'night-supervisor', class: 'input-sm' }, el('option', { value: '' }, 'Supervisor (opcional)')),
+        el('select', { id: 'night-supervisor', class: 'input-sm' },
+          el('option', { value: '' }, 'Supervisor (opcional)'),
+          ...(SUPERVISORES || []).map(s => el('option', { value: s.id }, s.nombre + ' \u2014 ' + s.legajo))
+        ),
         el('button', { class: 'btn btn-primary', onclick: async () => {
           try {
             const d = $id('night-date').value; if (!d) throw new Error('Fecha requerida');
@@ -2029,7 +2042,7 @@ async function renderSaturdayMgmtV12() {
   const dateLabel = satMgmtDate.replace(/_/g, '-');
 
   // Filtrar eventos por la fecha del sábado que se está gestionando (v1.2)
-  const evsOfDate = sd.events.filter(e => e.fechaSabado === dateLabel);
+  const evsOfDate = (sd.events || []).filter(e => e.fechaSabado === dateLabel);
 
   // --- FASE 1: Intenciones (estado: anotado) ---
   const intentList = el('div', { class: 'sat-phase-list' });
@@ -2042,6 +2055,11 @@ async function renderSaturdayMgmtV12() {
       intentList.appendChild(el('div', { class: 'phase-item' },
         el('span', { class: 'phase-item-name' }, emp ? emp.name : i.empleado_id),
         el('span', { class: 'muted small' }, 'Sector/Rol: ' + (i.sector || 'N/A') + '/' + (i.rol || 'N/A')),
+        el('button', { class: 'btn btn-xs btn-danger', onclick: async () => {
+          const removed = await Models.removeEmployeeIntent(i.empleado_id, dateLabel);
+          if (removed > 0) { toast('Anotación eliminada.', 'success'); renderSaturdayMgmtV12(); }
+          else toast('No se encontró la anotación.', 'warning');
+        }}, '✕ Quitar')
       ));
     });
   }
@@ -2300,6 +2318,16 @@ async function openSaturdayV12Modal(employeeId) {
     {
       label: 'Anotar', cls: 'btn btn-primary', action: async () => {
         try {
+          // Verificar doble anotaci\u00f3n
+          const stateCheck = await Models.exportState();
+          const sdCheck = stateCheck.saturdayData || { events: [] };
+          const alreadyRegistered = (sdCheck.events || []).some(
+            ev => ev.empleado_id === employeeId && ev.fechaSabado === fechaDestino && ev.estado !== 'falto'
+          );
+          if (alreadyRegistered) {
+            toast('Este empleado ya est\u00e1 anotado para este s\u00e1bado.', 'error');
+            return;
+          }
           const sector = $id('sabadoSectorSelect').value;
           const rol = $id('sabadoRolSelect').value;
           const extend = $id('satv12-ext').value === 'true';
@@ -2329,7 +2357,13 @@ async function openAddAssignmentV12Modal(dateKey, intentions) {
   const supervisors = (allEmps || []).filter(em => em && em.is_supervisor === true && em.activo === true);
 
   const sel = el('select', { id: 'asgnv12-event', class: 'input-full' },
-    ...intentions.map(i => el('option', { value: i.id, 'data-empid': i.empleado_id }, 'EventID: ' + i.id + ' | Emp: ' + i.empleado_id))
+    ...intentions.map(i => {
+      const emp = (allEmps || []).find(e => e.id === i.empleado_id);
+      const label = emp
+        ? (emp.name || emp.id) + ' \u2014 Leg. ' + (emp.legajo || '\u2014')
+        : i.empleado_id;
+      return el('option', { value: i.id, 'data-empid': i.empleado_id }, label);
+    })
   );
   const supSelect = el('select', { id: 'asgnv12-sup', class: 'input-full' },
     el('option', { value: '' }, 'Seleccionar supervisor'),
@@ -2342,7 +2376,7 @@ async function openAddAssignmentV12Modal(dateKey, intentions) {
     formField('¿Descanso 12 horas cumplido?', el('select', { id: 'asgnv12-12hs', class: 'input-full' },
       el('option', { value: 'false' }, 'No'), el('option', { value: 'true' }, 'Si')
     )),
-    formField('Motivo Asignacion (REQUERIDO si no esta en Top 3 ranking)', el('input', { id: 'asgnv12-motivo', type: 'text', class: 'input-full', placeholder: 'Escribe el motivo aquí' })),
+    formField('Motivo Asignacion (recomendado si no está en Top 3 ranking)', el('input', { id: 'asgnv12-motivo', type: 'text', class: 'input-full', placeholder: 'Escribe el motivo aquí' })),
     formField('Supervisor', supSelect)
   );
 
@@ -2360,13 +2394,11 @@ async function openAddAssignmentV12Modal(dateKey, intentions) {
         const sup = $id('asgnv12-sup').value;
         if (!start || !end) { toast('Horario requerido', 'error'); return; }
 
+        if (!top3Ids.includes(empId) && !reason) {
+          toast('Estás asignando fuera del TOP 3. Se recomienda indicar un motivo.', 'warning');
+        }
         try {
-          if (top3Ids.includes(empId) && !reason) {
-            await Models.asignarSabado(evId, start, end, rests);
-          } else {
-            if (!reason) { toast('Estás asignando alguien fuera del TOP 3 de los Sábados, REQUIERE MOTIVO', 'error'); return; }
-            await Models.asignarSabadoFueraDeRanking(evId, start, end, rests, reason, sup);
-          }
+          await Models.asignarSabado(evId, start, end, rests, reason || null, sup || null);
           closeModal(); renderSaturdayMgmtV12();
           toast('Asignacion procesada!', 'success');
         } catch (e) { toast(e.message, 'error'); }

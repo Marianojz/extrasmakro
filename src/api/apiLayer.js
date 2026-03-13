@@ -23,7 +23,8 @@ const WRITE_ACTIONS = new Set([
   'assignEmployeeToSaturday','removeAssignmentFromSaturday','recordWeekdayExtra','addAuditLog',
   'updateSystemConfig','importState','registrarAnotacionSabado','asignarSabado','asignarSabadoFueraDeRanking',
   'registrarTrabajoSabado','registrarFaltaSabado','setWeekAvailability','resetWeekAvailability','bulkSetWeekAvailability',
-  'applyMonthlyRecovery','applyMonthlyRecoverySabado','expireStaleDescargas','deactivateExpiredEventuals','purgeOldWeekAvailability'
+  'applyMonthlyRecovery','applyMonthlyRecoverySabado','expireStaleDescargas','deactivateExpiredEventuals','purgeOldWeekAvailability',
+  'removeEmployeeIntent'
 ]);
 
 // Default export: proxy-like object that mirrors models API but routes writes through serverExecute

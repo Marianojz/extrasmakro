@@ -150,7 +150,7 @@ async function updateEmployee(id, patch, user) {
 
 async function listEmployees() {
   const state = await store.load();
-  return state.employeesList.map(id => state.employees[id]).filter(Boolean);
+  return (state.employeesList || []).map(id => state.employees[id]).filter(Boolean);
 }
 
 async function getEmployee(id) {
@@ -500,6 +500,32 @@ async function assignEmployeeToSaturday(dateKey, employeeId, supervisorId, user)
   applyMetadata(ev, user);
   applyMetadata(state.employees[employeeId], user);
   await store.save(state);
+}
+
+/**
+ * Elimina la intención (estado 'anotado') de un empleado para un sábado.
+ * Decrementa el contador sabados_anotados y persiste el estado.
+ * @param {string} employeeId
+ * @param {string} date  Formato YYYY-MM-DD
+ * @returns {Promise<number>} cantidad de entradas eliminadas
+ */
+async function removeEmployeeIntent(employeeId, date) {
+  const state = await store.load();
+  ensureSaturdayData(state);
+  const empId = String(employeeId);
+  const before = (state.saturdayData.events || []).length;
+  state.saturdayData.events = (state.saturdayData.events || []).filter(
+    ev => !(ev.empleado_id === empId && ev.fechaSabado === date && ev.estado === 'anotado')
+  );
+  const removed = before - state.saturdayData.events.length;
+  if (removed > 0) {
+    const stats = state.saturdayData.employees[empId];
+    if (stats) {
+      stats.sabados_anotados = Math.max(0, (stats.sabados_anotados || 0) - removed);
+    }
+    await store.save(state);
+  }
+  return removed;
 }
 
 /** Cancela la asignación de un empleado a un sábado. */
@@ -1218,13 +1244,12 @@ async function asignarSabado(eventId, horarioInicio, horarioFin, desc_12hs = fal
     .map(x => x.id);
   const top3 = ranked.slice(0, 3);
 
-  // Si el empleado no está en el top3, motivo obligatorio y auditar
+  // Si el empleado no está en el top3, registrar auditoría (motivo recomendado pero no bloqueante)
   if (!top3.includes(ev.empleado_id)) {
-    if (!motivo) throw new Error('Motivo obligatorio para asignación fuera del top 3');
     pushAudit(state, {
       tipo: 'asignacion_sabado_fuera_ranking',
       empleado_id: ev.empleado_id,
-      motivo: motivo,
+      motivo: motivo || '',
       supervisor: supervisorId || 'sistema'
     });
   }
@@ -1243,7 +1268,7 @@ async function asignarSabado(eventId, horarioInicio, horarioFin, desc_12hs = fal
 }
 
 async function asignarSabadoFueraDeRanking(eventId, horarioInicio, horarioFin, desc_12hs, motivo, supervisorId, user) {
-  if (!motivo) throw new Error('Motivo obligatorio para asignación fuera de top 3');
+  // motivo recomendado pero no bloqueante — se audita igual
   const ev = await asignarSabado(eventId, horarioInicio, horarioFin, desc_12hs, motivo, supervisorId, user);
 
   const state = await store.load();
@@ -1371,7 +1396,7 @@ async function applyMonthlyRecoverySabado(yearMonth, user) {
 async function obtenerRankingSabado() {
   const state = await store.load();
   ensureSaturdayData(state);
-  const activosemp = state.employeesList.filter(id => state.employees[id] && state.employees[id].activo);
+  const activosemp = (state.employeesList || []).filter(id => state.employees[id] && state.employees[id].activo);
 
   return activosemp
     .map(id => ({
@@ -1552,7 +1577,7 @@ export {
   // MÓDULO SÁBADO V1.2
   registrarAnotacionSabado, asignarSabado, asignarSabadoFueraDeRanking,
   registrarTrabajoSabado, registrarFaltaSabado,
-  applyMonthlyRecoverySabado, obtenerRankingSabado
+  applyMonthlyRecoverySabado, obtenerRankingSabado, removeEmployeeIntent
   , runSystemAudit
   ,
   // MÓDULO TURNO NOCHE FASE 3C

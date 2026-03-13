@@ -131,3 +131,17 @@ export const EMPLOYEE_PUESTOS = [
 export const STORAGE_MODE = (typeof process !== 'undefined' && process.env && process.env.STORAGE_MODE)
   ? process.env.STORAGE_MODE
   : 'local';
+
+// Lista estática de supervisores de turno noche
+export const SUPERVISORES = [
+  { id: 'sup1', nombre: 'BARNECHEA, CARLOS VICTORIANO', legajo: 2012 },
+  { id: 'sup2', nombre: 'SUPERVISOR 2', legajo: 0 },
+];
+
+// Tipos de hora extra permitidos
+export const EXTRA_TIPOS = [
+  { value: 'turno_manana',     label: 'Turno mañana'      },
+  { value: 'turno_tarde',      label: 'Turno tarde'       },
+  { value: 'turno_intermedio', label: 'Turno intermedio'  },
+  { value: 'refuerzo_operativo', label: 'Refuerzo operativo' },
+];
