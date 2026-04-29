@@ -8,11 +8,28 @@ const {
   set,
   get,
   update,
-  remove
+  remove,
+  getAuth,
+  signInAnonymously
 } = window.firebaseModules;
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
+
+// Attempt anonymous auth if auth methods are available. Keep a module-level
+// promise so load() can await it and avoid 'Permission denied' on first read.
+let _firebaseAnonSignIn = null;
+if (getAuth && signInAnonymously) {
+  const authInit = async () => {
+    try {
+      const auth = getAuth(app);
+      await signInAnonymously(auth);
+    } catch (err) {
+      console.warn('Firebase anonymous auth failed', err);
+    }
+  };
+  _firebaseAnonSignIn = authInit();
+}
 
 /**
  * FirebaseAdapter — Conectado a Firebase Realtime Database.
@@ -24,6 +41,7 @@ const db = getDatabase(app);
  * @returns {Promise<import('./adapter.js').AppState>}
  */
 async function load() {
+  if (_firebaseAnonSignIn) await _firebaseAnonSignIn;
   const snapshot = await get(ref(db, "/"));
   const data = snapshot.exists() ? snapshot.val() : {};
 
