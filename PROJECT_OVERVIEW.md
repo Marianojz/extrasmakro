@@ -50,3 +50,37 @@ Aplicación web modular basada en:
 
 El sistema se ejecuta directamente en navegador.
 No requiere instalación de software adicional.
+
+---
+
+## Project status — 19/05/2026
+
+- Roadmap status: **PRE-FIREBASE HARDENED STAGING (partial)** — last updated 19/05/2026.
+- Roadmap (operacional): [ROADMAP_OPERACIONAL_HORAS_EXTRAS_V2.md](./ROADMAP_OPERACIONAL_HORAS_EXTRAS_V2.md)
+
+### Blocks (resumen breve)
+
+- Block A — Core: boundary operativo consolidado (apiLayer), scoring, convocatorias, reputación y persistencia local (localStorage) como paso inicial.
+- Block B — Operaciones: módulo Sábados, Turno Noche, exportación de reportes y auditoría técnica.
+- Block C — Gobernanza: políticas, procedimientos de descargos, modelo algorítmico y transparencia.
+- Block D — Integración y hardening: adapter Firebase, concurrencia multiusuario, retries y observabilidad (hardened-staging parcial).
+
+### Próximos pasos recomendados
+
+- A1.5.1 — Preparar integración de adapter Firebase en hardened-staging (lectura inicial): implementar contratos de adapter, agregar tests unitarios, habilitar modo read-only en staging, añadir hooks de observabilidad y retries, ejecutar pruebas smoke.
+
+### Cómo probar localmente (dev)
+
+- Generar build de la UI:
+
+```bash
+npm run build
+```
+
+- Ejecutar pruebas de smoke:
+
+```bash
+npm run test:smoke
+```
+
+> Estado instantáneo: PRE-FIREBASE HARDENED STAGING (partial). Última actualización: 19/05/2026.
