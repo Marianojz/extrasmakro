@@ -1,9 +1,16 @@
 import { DEBUG_MODE } from './config.js';
+import { generateEntityId, normalizeId } from './utils_id.js';
 
 function debugLog(...args) {
   if (DEBUG_MODE) {
     console.log(...args);
   }
+}
+
+function generateId(prefix = '') {
+  // LEGACY ID SUPPORT — delegate UUID generation to centralized helper
+  const id = generateEntityId();
+  return prefix ? `${prefix}_${id}` : id;
 }
 
 function fmtDate(iso) {
@@ -145,4 +152,4 @@ function toXLS(sheetsOrRows, sheetName = 'Hoja1') {
   return new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
 }
 
-export { debugLog, fmtDate, toCSV, parseCSV, makeFilename, downloadBlob, toXLS };
+export { debugLog, fmtDate, toCSV, parseCSV, makeFilename, downloadBlob, toXLS, generateId };

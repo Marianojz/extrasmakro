@@ -32,7 +32,19 @@ Aplicación web modular basada en:
 
 - JavaScript modular
 - almacenamiento adaptable (localStorage / Firebase)
-- separación por capas (models / storage / ui)
+- separación por capas (`ui / apiLayer / models / storage`)
+
+### Boundary operativo consolidado
+
+- Flujo oficial: `UI -> apiLayer -> models -> store/adapters`
+- `src/api/apiLayer.js` es la puerta oficial entre UI y dominio.
+- `app.js` no accede directamente a `store`, `storage` ni adapters.
+- El boundary queda preparado para Firebase, multiusuario, observabilidad, métricas y tracing.
+
+### Riesgos restantes
+
+- La compatibilidad legacy mantiene llamadas planas sobre `apiLayer`; no son bypasses, pero conviven con la API namespaced nueva.
+- La robustez multiusuario futura sigue dependiendo de extender retries, observabilidad y políticas de concurrencia sobre el boundary ya consolidado.
 
 ## Uso
 

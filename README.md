@@ -131,6 +131,7 @@ Módulo completo para operativos nocturnos con planificación por sectores:
 
 - Control del turno semanal de extras de días hábiles (registrado en historial).
 - Parámetros configurables de cada módulo.
+- Feature toggles corporativos centralizados en `src/config/features.js`, preparados para futura configuración remota.
 - Auditoría completa: todas las decisiones críticas (resolución de descargos, cierre de turno noche, asignaciones con desvío del ranking) quedan registradas en el log de auditoría con timestamp y responsable.
 
 ### Exportación e importación de datos
@@ -146,9 +147,13 @@ Módulo completo para operativos nocturnos con planificación por sectores:
 ```
 src/
 ├── app.js          # Interfaz de usuario (DOM, tabs, modales, eventos)
-├── models.js       # Toda la lógica de negocio (sin dependencia de UI)
+├── api/
+│   └── apiLayer.js # Boundary oficial UI -> dominio; centraliza locks, async y errores
+├── models.js       # Lógica de negocio y orquestación de persistencia
 ├── config.js       # Parámetros configurables (penalizaciones, límites, fórmulas)
-├── store.js        # Capa de acceso a datos (delega al adapter activo)
+├── config/
+│   └── features.js # Feature toggles corporativos y helpers centralizados
+├── store.js        # Compatibilidad interna hacia el adapter activo (no consumido por UI)
 ├── utils.js        # Helpers generales y debugLog
 ├── styles.css      # Estilos de la aplicación
 ├── firebaseConfig.js  # Credenciales Firebase (a completar cuando corresponda)
@@ -160,11 +165,24 @@ src/
 
 **Principios de diseño:**
 
-- La **UI no accede directamente al storage**: toda operación pasa por `models.js`.
+- La **UI no accede directamente al storage ni a adapters**: toda operación pasa por `src/api/apiLayer.js`.
+- El flujo operativo oficial es **UI -> apiLayer -> models -> store/adapters**.
+- `apiLayer` centraliza el boundary operativo: locks, control async, validaciones, manejo de errores y hooks de observabilidad futura.
 - Los **adapters son intercambiables**: pasar de localStorage a Firebase solo requiere cambiar una bandera en `config.js`.
 - **Separación estricta de responsabilidades**: la lógica de negocio es completamente independiente de la interfaz.
 - **Trazabilidad completa**: cada acción crítica genera una entrada en `auditLogs`.
 - **Defensivo por diseño**: validaciones fuertes en todas las operaciones de modelos, protección contra NaN en el scoring, guards contra doble aplicación de horas.
+
+### Boundary operativo consolidado
+
+- `app.js` consume el dominio exclusivamente vía `apiLayer`.
+- `apiLayer` expone namespaces preparados para evolución (`api.employees.create()`, `api.calls.addAttempt()`, `api.audit.append()`) sin romper compatibilidad con la API plana existente.
+- La inicialización y verificación de backend remoto también se canalizan por el boundary.
+
+### Riesgos restantes
+
+- La concurrencia multiusuario depende todavía de las garantías de cada adapter; `apiLayer` ya concentra el punto de entrada para sumar retries, métricas y tracing sin reabrir bypasses.
+- Persisten llamadas legacy planas (`Models.*`) en UI por compatibilidad; no son bypasses porque siguen pasando por `apiLayer`, pero aún convive más de una forma de consumo.
 
 ---
 
@@ -219,5 +237,3 @@ PROJECT_OVERVIEW.md  Resumen ejecutivo del proyecto
 ## Licencia
 
 MIT License — © 2026 Celsur
-
-

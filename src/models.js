@@ -8,13 +8,47 @@
 
 import store from './store.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE } from './config.js';
-import { INITIAL_STATE } from './storage/adapter.js';
-import { debugLog } from './utils.js';
+import { isFeatureEnabled } from './config/features.js';
+import { INITIAL_STATE, resolveStateMutation, skipStateWrite, withoutLegacyStateFields } from './storage/adapter.js';
+import { debugLog, generateId } from './utils.js';
+import { normalizeId, generateEntityId } from './utils_id.js';
 
 // ─── Utilidades internas ─────────────────────────────────────────────────────
 
 function now() {
   return new Date().toISOString();
+}
+
+export function initializeStorageBackend() {
+  if (APP_CONFIG.STORAGE_BACKEND !== 'supabase') {
+    return {
+      backend: APP_CONFIG.STORAGE_BACKEND,
+      initialized: false,
+    };
+  }
+
+  if (typeof store.initSupabase !== 'function') {
+    throw new Error('Supabase adapter does not support initSupabase()');
+  }
+
+  if (typeof window.supabaseModules === 'undefined') {
+    throw new Error('Supabase backend selected but Supabase CDN not loaded');
+  }
+
+  store.initSupabase(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_KEY);
+
+  return {
+    backend: APP_CONFIG.STORAGE_BACKEND,
+    initialized: true,
+  };
+}
+
+export async function verifyStorageConnection() {
+  await store.load();
+  return {
+    backend: APP_CONFIG.STORAGE_BACKEND,
+    connected: true,
+  };
 }
 
 /**
@@ -27,13 +61,139 @@ function sanitizeName(rawName) {
   if (typeof rawName !== 'string') return rawName;
   return rawName.replace(/null/gi, '').replace(/\s{2,}/g, ' ').trim();
 }
+
+function ensureEntityId(entity, prefix, fallbackId = null) {
+  if (!entity || typeof entity !== 'object') return entity;
+  if (entity.id === undefined || entity.id === null || entity.id === '') {
+    // UUID ENTITY — use centralized UUID generator for all NEW entities
+    entity.id = fallbackId ?? generateEntityId(); // LEGACY COMPATIBLE: existing numeric/string ids are preserved
+    // Ensure createdAt exists for new entities (preserve legacy ts/timestamp if present)
+    if (entity.createdAt === undefined || entity.createdAt === null) {
+      entity.createdAt = entity.ts || entity.timestamp || now();
+    }
+  }
+  return entity;
+}
+
+function cloneAuditSnapshot(value) {
+  if (value === undefined) return null;
+  return structuredClone(value);
+}
+
+function resolveAuditUser(user) {
+  if (user && typeof user === 'object') {
+    const userId = user.id || user.userId || user.username || user.nombre || user.name;
+    if (userId) {
+      return {
+        id: String(userId),
+        nombre: user.name || user.nombre || null,
+      };
+    }
+  }
+
+  if (typeof user === 'string' && user.trim()) {
+    return { id: user.trim(), nombre: null };
+  }
+
+  return {
+    id: 'sistema',
+    nombre: 'Sistema',
+  };
+}
+
+function appendAuditLogEntry(state, {
+  operation,
+  entity,
+  entityId = null,
+  before = null,
+  after = null,
+  origin = 'models',
+  details = {},
+  tipo = null,
+  ...extraFields
+}, user) {
+  const actor = resolveAuditUser(user);
+  const auditTs = now();
+
+  pushAudit(state, {
+    schema: 'forensic-audit-v1',
+    tipo: tipo || operation,
+    operation,
+    entity,
+    entityId,
+    usuario: actor.id,
+    userId: actor.id,
+    actor,
+    origin,
+    before: cloneAuditSnapshot(before),
+    after: cloneAuditSnapshot(after),
+    details: cloneAuditSnapshot(details),
+    ...extraFields,
+    ts: auditTs,
+    timestamp: auditTs,
+  });
+}
+
+const CRITICAL_AUDIT_EVENT_MAP = Object.freeze({
+  employees: Object.freeze([
+    'employee.created',
+    'employee.updated',
+    'employee.auto_deactivated',
+  ]),
+  callEvents: Object.freeze([
+    'call.created',
+    'call.attempt_added',
+    'penalty.applied',
+    'penalty.descargo_submitted',
+    'penalty.descargo_resolved',
+    'penalty.expired',
+  ]),
+  saturday: Object.freeze([
+    'saturday.event_created',
+    'saturday.intention_added',
+    'saturday.intention_removed',
+    'saturday.assignment_added',
+    'saturday.assignment_removed',
+    'saturday.annotation_created',
+    'saturday.annotation_removed',
+    'saturday.assigned',
+    'saturday.assigned_outside_ranking',
+    'saturday.work_recorded',
+    'saturday.absence_recorded',
+    'saturday.monthly_recovery_applied',
+  ]),
+  config: Object.freeze([
+    'config.updated',
+    'config.shift_week_changed',
+    'availability.updated',
+    'availability.bulk_updated',
+    'availability.reset',
+    'availability.purged',
+    'config.monthly_recovery_applied',
+  ]),
+  system: Object.freeze([
+    'state.imported',
+    'state.reset',
+    'audit.manual_entry',
+  ]),
+});
+
 function pushAudit(state, payload) {
   if (!state.auditLogs) state.auditLogs = [];
+  const { id, ts, timestamp, ...rest } = payload || {};
+  const auditTs = ts || timestamp || now();
   state.auditLogs.push({
-    id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    timestamp: now(),
-    ...payload
-  });
+    ...rest,
+      // UUID ENTITY — new audit entries must use UUIDs; preserve legacy id when provided
+      id: id || generateEntityId(),
+      ts: auditTs,
+      timestamp: timestamp || auditTs,
+      // LEGACY COMPATIBLE — add createdAt for new audit entries (preserve provided createdAt if present)
+      createdAt: rest.createdAt || auditTs,
+      // Minimal append-only metadata
+      version: rest.version || 1,
+      appendOnly: rest.appendOnly === undefined ? true : !!rest.appendOnly,
+    });
 }
 
 /**
@@ -51,32 +211,78 @@ function applyMetadata(entity, user, incomingVersion) {
   entity.updatedBy = user.id;
 }
 
+async function updateState(mutator) {
+  if (typeof store.update === 'function') {
+    return await store.update(mutator);
+  }
 
-/**
- * Genera un ID numérico único autoincremental.
- * BUG CORREGIDO: la versión anterior hacía state.nextIdCounter = id
- * reseteando el contador al valor pre-increment en cada llamada.
- */
-async function generateId() {
   const state = await store.load();
-  const id = state.nextIdCounter;
-  state.nextIdCounter = id + 1;
-  await store.save(state);
-  return String(id);
+  const mutation = await mutator(state);
+  const { shouldWrite, nextState, result } = resolveStateMutation(state, mutation);
+  if (shouldWrite) {
+    await store.save(nextState);
+  }
+  return result;
 }
+
+const DISABLED_SCORE_META = Object.freeze({
+  score: 0,
+  total_horas: 0,
+  convocado: 0,
+  reputationScore: 0,
+  confiabilidad: 1,
+  disabled: true,
+});
+
+function isRankingEnabled() {
+  return isFeatureEnabled('rankings');
+}
+
+function isReputationEnabled() {
+  return isFeatureEnabled('reputationSystem');
+}
+
+function isPenaltyEnabled() {
+  return isReputationEnabled() && isFeatureEnabled('penalties');
+}
+
+function isAdvancedStatsEnabled() {
+  return isFeatureEnabled('advancedStats');
+}
+
+function isSaturdayRankingEnabled() {
+  return isFeatureEnabled('saturdayRanking');
+}
+
+function getEmployeeReputation(emp) {
+  if (!isReputationEnabled()) return 0;
+  return emp?.reputation || 0;
+}
+
+function applyPositiveReputation(emp, delta) {
+  if (!isReputationEnabled()) return;
+  emp.reputation = Math.min(100, (emp.reputation || 0) + delta);
+}
+
 
 /**
  * Aplica una penalización de reputación y crea el incidente asociado.
  */
 function applyPenalty(emp, delta, reason) {
+  if (!isPenaltyEnabled()) return null;
+  if (!Array.isArray(emp.incidents)) emp.incidents = [];
+  const ts = now();
   const incident = {
-    id: 'inc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    ts: now(),
-    delta,
-    reason,
-    status: 'pendiente_descargo',
-    descargo: null,
-  };
+      // UUID ENTITY — incident id for new incidents
+      id: generateEntityId(),
+      ts,
+      timestamp: ts,
+      createdAt: ts,
+      delta,
+      reason,
+      status: 'pendiente_descargo',
+      descargo: null,
+    };
   emp.reputation = Math.max(0, Math.min(100, emp.reputation + delta));
   emp.incidents.push(incident);
   return incident;
@@ -90,62 +296,100 @@ async function initEmployee({ name, turno_base, tipo, antiguedad_meses = 0, acti
   if (!['efectivo', 'eventual_comun', 'eventual_especial'].includes(tipo)) throw new Error('tipo inválido.');
   if (tipo === 'eventual_comun' && !fecha_fin) throw new Error('Fecha fin requerida para eventual_comun.');
 
-  // generateId ya hace load+save internamente, re-leer para tener el estado actualizado
-  const id = await generateId();
-  const freshState = await store.load();
-  const employee = {
-    id,
-    name: sanitizeName(name),
-    turno_base,
-    tipo,
-    antiguedad_meses,
-    activo,
-    fecha_fin: fecha_fin || null,
-    telefono: (telefono || '').trim(),
-    legajo: (legajo || '').trim(),
-    puesto: (puesto || '').trim(),
-    reputation: APP_CONFIG.INITIAL_REPUTATION,
-    stats: {
-      horas_50: 0, horas_100: 0, convocado: 0, acepto: 0,
-      rechazo: 0, no_respondio: 0, numero_incorrecto: 0,
-      falto: 0, sabados_trabajados: 0,
-    },
-    incidents: [],
-    createdAt: now(),
-  };
+  return await updateState(freshState => {
+    const id = generateEntityId(); // UUID ENTITY
+    const employee = {
+      id,
+      name: sanitizeName(name),
+      turno_base,
+      tipo,
+      antiguedad_meses,
+      activo,
+      fecha_fin: fecha_fin || null,
+      telefono: (telefono || '').trim(),
+      legajo: (legajo || '').trim(),
+      puesto: (puesto || '').trim(),
+      reputation: APP_CONFIG.INITIAL_REPUTATION,
+      stats: {
+        horas_50: 0, horas_100: 0, convocado: 0, acepto: 0,
+        rechazo: 0, no_respondio: 0, numero_incorrecto: 0,
+        falto: 0, sabados_trabajados: 0,
+      },
+      incidents: [],
+      createdAt: now(),
+    };
 
-  freshState.employees[id] = employee;
-  freshState.employeesList.push(id);
+    freshState.employees[id] = employee;
+    freshState.employeesList.push(id);
 
-  if (!freshState.saturdayData) {
-    freshState.saturdayData = { employees: {}, events: [], config: { lastRecoveryMonth: null } };
-  }
-  freshState.saturdayData.employees[id] = {
-    horas_sabado_totales: 0,
-    sabados_trabajados: 0,
-    sabados_anotados: 0,
-    sabados_faltados: 0,
-    reputation_sabado: 100,
-    score_sabado: 0
-  };
+    if (!freshState.saturdayData) {
+      freshState.saturdayData = { employees: {}, events: [], config: { lastRecoveryMonth: null } };
+    }
+    freshState.saturdayData.employees[id] = {
+      horas_sabado_totales: 0,
+      sabados_trabajados: 0,
+      sabados_anotados: 0,
+      sabados_faltados: 0,
+      reputation_sabado: 100,
+      score_sabado: 0
+    };
 
-  await store.save(freshState);
-  // metadata for created entity
-  applyMetadata(employee, user);
-  return employee;
+    applyMetadata(employee, user);
+    appendAuditLogEntry(freshState, {
+      operation: 'employee.created',
+      entity: 'employee',
+      entityId: id,
+      before: null,
+      after: {
+        id,
+        name: employee.name,
+        turno_base: employee.turno_base,
+        tipo: employee.tipo,
+        activo: employee.activo,
+      },
+      origin: 'employees.init',
+    }, user);
+    return employee;
+  });
 }
 
 async function updateEmployee(id, patch, user) {
-  const state = await store.load();
-  const emp = state.employees[id];
-  if (!emp) throw new Error('Empleado no encontrado: ' + id);
-  // Sanitizar nombre si viene en el patch
-  if (typeof patch?.name === 'string') patch.name = sanitizeName(patch.name);
-  Object.assign(emp, patch);
-  // Version check + metadata
-  applyMetadata(emp, user, patch?.version);
-  await store.save(state);
-  return emp;
+  return await updateState(state => {
+    const emp = state.employees[id];
+    if (!emp) throw new Error('Empleado no encontrado: ' + id);
+    const before = {
+      id: emp.id,
+      name: emp.name,
+      turno_base: emp.turno_base,
+      tipo: emp.tipo,
+      activo: emp.activo,
+      telefono: emp.telefono || '',
+      legajo: emp.legajo || '',
+      puesto: emp.puesto || '',
+    };
+    if (typeof patch?.name === 'string') patch.name = sanitizeName(patch.name);
+    Object.assign(emp, patch);
+    applyMetadata(emp, user, patch?.version);
+    appendAuditLogEntry(state, {
+      operation: 'employee.updated',
+      entity: 'employee',
+      entityId: id,
+      before,
+      after: {
+        id: emp.id,
+        name: emp.name,
+        turno_base: emp.turno_base,
+        tipo: emp.tipo,
+        activo: emp.activo,
+        telefono: emp.telefono || '',
+        legajo: emp.legajo || '',
+        puesto: emp.puesto || '',
+      },
+      origin: 'employees.update',
+      details: { changedKeys: Object.keys(patch || {}) },
+    }, user);
+    return emp;
+  });
 }
 
 async function listEmployees() {
@@ -186,124 +430,220 @@ function calcularScoreSabado(stats) {
 // ─── Convocatorias ───────────────────────────────────────────────────────────
 
 async function createCallEvent({ empleado_id, fecha, tipo_extra, supervisor_id = null }, user) {
-  const state = await store.load();
-  if (!state.employees[empleado_id]) throw new Error('Empleado no encontrado: ' + empleado_id);
+  return await updateState(state => {
+    if (!state.employees[empleado_id]) throw new Error('Empleado no encontrado: ' + empleado_id);
 
-  const id = 'call_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-  const event = {
-    id, empleado_id, fecha, tipo_extra,
-    attempts: [], resultado_final: null,
-    supervisor_id, timestamp: now(),
-  };
-  state.callEvents[id] = event;
-  state.employees[empleado_id].stats.convocado += 1;
-  // apply metadata when user provided
-  applyMetadata(event, user);
-  applyMetadata(state.employees[empleado_id], user);
-  await store.save(state);
-  return event;
+    const id = generateEntityId(); // UUID ENTITY
+    const ts = now();
+    const event = {
+      id, empleado_id, fecha, tipo_extra,
+      attempts: [], resultado_final: null,
+      supervisor_id, timestamp: ts,
+      createdAt: ts,
+    };
+    state.callEvents[id] = event;
+    state.employees[empleado_id].stats.convocado += 1;
+    applyMetadata(event, user);
+    applyMetadata(state.employees[empleado_id], user);
+    appendAuditLogEntry(state, {
+      operation: 'call.created',
+      entity: 'callEvent',
+      entityId: id,
+      before: null,
+      after: {
+        id,
+        empleado_id,
+        fecha,
+        tipo_extra,
+        supervisor_id,
+        attempts: 0,
+        resultado_final: null,
+      },
+      origin: 'calls.create',
+    }, user);
+    return event;
+  });
 }
 
 async function addCallAttempt(callId, { status, note = '' }, user) {
   const VALID_STATUSES = ['confirmado', 'rechazo', 'no_respondio', 'numero_incorrecto', 'atendio_otro', 'falto'];
   if (!VALID_STATUSES.includes(status)) throw new Error('Estado inválido: ' + status);
 
-  const state = await store.load();
-  const ev = state.callEvents[callId];
-  if (!ev) throw new Error('Convocatoria no encontrada: ' + callId);
-  if (ev.resultado_final) throw new Error('Convocatoria ya cerrada: ' + ev.resultado_final);
-  if (ev.attempts.length >= APP_CONFIG.MAX_CALL_ATTEMPTS) {
-    throw new Error('Máximo de intentos alcanzado (' + APP_CONFIG.MAX_CALL_ATTEMPTS + ').');
-  }
+  return await updateState(state => {
+    const ev = state.callEvents[callId];
+    if (!ev) throw new Error('Convocatoria no encontrada: ' + callId);
+    if (ev.resultado_final) throw new Error('Convocatoria ya cerrada: ' + ev.resultado_final);
+    if (ev.attempts.length >= APP_CONFIG.MAX_CALL_ATTEMPTS) {
+      throw new Error('Máximo de intentos alcanzado (' + APP_CONFIG.MAX_CALL_ATTEMPTS + ').');
+    }
 
-  ev.attempts.push({ ts: now(), status, note });
+    const before = {
+      id: ev.id,
+      attempts: (ev.attempts || []).length,
+      resultado_final: ev.resultado_final || null,
+    };
+    const attempt = { ts: now(), status, note };
+    ev.attempts.push(attempt);
 
-  const isSecondAttempt = ev.attempts.length >= APP_CONFIG.MAX_CALL_ATTEMPTS;
-  const terminalStates = ['confirmado', 'rechazo', 'numero_incorrecto', 'falto'];
-  const isTerminal = terminalStates.includes(status) || (status === 'no_respondio' && isSecondAttempt);
+    const isSecondAttempt = ev.attempts.length >= APP_CONFIG.MAX_CALL_ATTEMPTS;
+    const terminalStates = ['confirmado', 'rechazo', 'numero_incorrecto', 'falto'];
+    const isTerminal = terminalStates.includes(status) || (status === 'no_respondio' && isSecondAttempt);
 
-  if (isTerminal) {
-    ev.resultado_final = status;
-    const emp = state.employees[ev.empleado_id];
-    if (emp) {
-      const P = APP_CONFIG.REPUTATION_PENALTIES;
-      switch (status) {
-        case 'confirmado': emp.stats.acepto += 1; break;
-        case 'rechazo': emp.stats.rechazo += 1; applyPenalty(emp, P.rechazo, 'rechazo'); break;
-        case 'no_respondio': emp.stats.no_respondio += 1; applyPenalty(emp, P.no_respondio, 'no_respondio'); break;
-        case 'numero_incorrecto': emp.stats.numero_incorrecto += 1; applyPenalty(emp, P.numero_incorrecto, 'numero_incorrecto'); break;
-        case 'falto': emp.stats.falto += 1; applyPenalty(emp, P.falto, 'falto'); break;
+    if (isTerminal) {
+      ev.resultado_final = status;
+      const emp = state.employees[ev.empleado_id];
+      if (emp) {
+        const reputationBefore = emp.reputation;
+        const P = APP_CONFIG.REPUTATION_PENALTIES;
+        let incident = null;
+        switch (status) {
+          case 'confirmado': emp.stats.acepto += 1; break;
+          case 'rechazo': emp.stats.rechazo += 1; incident = applyPenalty(emp, P.rechazo, 'rechazo'); break;
+          case 'no_respondio': emp.stats.no_respondio += 1; incident = applyPenalty(emp, P.no_respondio, 'no_respondio'); break;
+          case 'numero_incorrecto': emp.stats.numero_incorrecto += 1; incident = applyPenalty(emp, P.numero_incorrecto, 'numero_incorrecto'); break;
+          case 'falto': emp.stats.falto += 1; incident = applyPenalty(emp, P.falto, 'falto'); break;
+        }
+        if (incident) {
+          appendAuditLogEntry(state, {
+            operation: 'penalty.applied',
+            entity: 'incident',
+            entityId: incident.id,
+            before: {
+              empleado_id: ev.empleado_id,
+              reputation: reputationBefore,
+            },
+            after: {
+              empleado_id: ev.empleado_id,
+              reputation: emp.reputation,
+              incidente_id: incident.id,
+              reason: incident.reason,
+              delta: incident.delta,
+              status: incident.status,
+            },
+            origin: 'calls.attempt.penalty',
+            details: { callId: ev.id, status },
+          }, user);
+        }
       }
     }
-  }
 
-  // metadata updates if user provided
-  applyMetadata(ev, user);
-  const emp2 = state.employees[ev.empleado_id];
-  applyMetadata(emp2, user);
-
-  await store.save(state);
-  return ev;
+    applyMetadata(ev, user);
+    applyMetadata(state.employees[ev.empleado_id], user);
+    appendAuditLogEntry(state, {
+      operation: 'call.attempt_added',
+      entity: 'callEvent',
+      entityId: ev.id,
+      before,
+      after: {
+        id: ev.id,
+        attempts: ev.attempts.length,
+        resultado_final: ev.resultado_final || null,
+        ultimo_intento: attempt,
+      },
+      origin: 'calls.attempt',
+    }, user);
+    return ev;
+  });
 }
 
 // ─── Descargos ───────────────────────────────────────────────────────────────
 
 async function submitDescargo(employeeId, incidentId, text, user) {
-  const state = await store.load();
-  const emp = state.employees[employeeId];
-  if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
-  const inc = emp.incidents.find(i => i.id === incidentId);
-  if (!inc) throw new Error('Incidente no encontrado: ' + incidentId);
-  if (inc.status !== 'pendiente_descargo') throw new Error('El incidente ya fue resuelto.');
-  if (Date.now() - new Date(inc.ts).getTime() > APP_CONFIG.DESCARGO_WINDOW_MS) {
-    inc.status = 'cerrado_sin_descargo';
-    await store.save(state);
+  if (!isPenaltyEnabled()) throw new Error('El módulo de penalizaciones está desactivado.');
+  let expired = false;
+  const result = await updateState(state => {
+    const emp = state.employees[employeeId];
+    if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
+    const inc = emp.incidents.find(i => normalizeId(i.id) === normalizeId(incidentId));
+    if (!inc) throw new Error('Incidente no encontrado: ' + incidentId);
+    if (inc.status !== 'pendiente_descargo') throw new Error('El incidente ya fue resuelto.');
+    if (Date.now() - new Date(inc.ts).getTime() > APP_CONFIG.DESCARGO_WINDOW_MS) {
+      inc.status = 'cerrado_sin_descargo';
+      expired = true;
+      return inc;
+    }
+    const before = {
+      incidente_id: inc.id,
+      status: inc.status,
+      descargo: inc.descargo,
+    };
+    inc.descargo = { text: text.trim(), ts: now() };
+    applyMetadata(inc, user);
+    applyMetadata(emp, user);
+    appendAuditLogEntry(state, {
+      operation: 'penalty.descargo_submitted',
+      entity: 'incident',
+      entityId: inc.id,
+      before,
+      after: {
+        incidente_id: inc.id,
+        status: inc.status,
+        descargo: inc.descargo,
+      },
+      origin: 'penalties.descargo.submit',
+      details: { empleado_id: employeeId },
+    }, user);
+    return inc;
+  });
+  if (expired) {
     throw new Error('Venció el plazo de 48h para presentar descargo.');
   }
-  inc.descargo = { text: text.trim(), ts: now() };
-  applyMetadata(inc, user);
-  applyMetadata(emp, user);
-  await store.save(state);
-  return inc;
+  return result;
 }
 
 async function resolveDescargo(employeeId, incidentId, approved, supervisor, resolutionText, user) {
+  if (!isPenaltyEnabled()) throw new Error('El módulo de penalizaciones está desactivado.');
   if (!supervisor?.trim() || !resolutionText?.trim()) {
     throw new Error('Supervisor y texto de resolución son obligatorios.');
   }
 
-  const state = await store.load();
-  const emp = state.employees[employeeId];
-  if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
-  const inc = emp.incidents.find(i => i.id === incidentId);
-  if (!inc) throw new Error('Incidente no encontrado: ' + incidentId);
-  if (inc.status !== 'pendiente_descargo') throw new Error('Incidente ya resuelto: ' + inc.status);
+  return await updateState(state => {
+    const emp = state.employees[employeeId];
+    if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
+      const inc = emp.incidents.find(i => normalizeId(i.id) === normalizeId(incidentId));
+    if (!inc) throw new Error('Incidente no encontrado: ' + incidentId);
+    if (inc.status !== 'pendiente_descargo') throw new Error('Incidente ya resuelto: ' + inc.status);
 
-  inc.status = approved ? 'revertido' : 'rechazado';
-  inc.resolvedAt = now();
-  if (approved) {
-    // inc.delta es negativo (ej. -15), revertir suma el valor absoluto
-    emp.reputation = Math.max(0, Math.min(100, emp.reputation - inc.delta));
-  }
+    const before = {
+      incidente_id: inc.id,
+      status: inc.status,
+      reputation: emp.reputation,
+      resolvedAt: inc.resolvedAt || null,
+    };
+    inc.status = approved ? 'revertido' : 'rechazado';
+    inc.resolvedAt = now();
+    if (approved && isReputationEnabled()) {
+      emp.reputation = Math.max(0, Math.min(100, emp.reputation - inc.delta));
+    }
 
-  // Agregar al auditLog
-  const log = {
-    // metadata (id/timestamp) will be handled by pushAudit
-    tipo: 'descargo_resuelto',
-    empleado_id: employeeId,
-    incidente_id: incidentId,
-    decision: approved ? 'aprobado' : 'rechazado',
-    supervisor: supervisor.trim(),
-    texto_resolucion: resolutionText.trim(),
-  };
-  pushAudit(state, log);
-
-  applyMetadata(inc, user);
-  applyMetadata(state.employees[employeeId], user);
-  applyMetadata(log, user);
-
-  await store.save(state);
-  return inc;
+    applyMetadata(inc, user);
+    applyMetadata(state.employees[employeeId], user);
+    appendAuditLogEntry(state, {
+      operation: 'penalty.descargo_resolved',
+      entity: 'incident',
+      entityId: incidentId,
+      before,
+      after: {
+        incidente_id: inc.id,
+        status: inc.status,
+        reputation: emp.reputation,
+        resolvedAt: inc.resolvedAt,
+      },
+      origin: 'penalties.descargo.resolve',
+      details: {
+        empleado_id: employeeId,
+        decision: approved ? 'aprobado' : 'rechazado',
+        supervisor: supervisor.trim(),
+        texto_resolucion: resolutionText.trim(),
+      },
+      empleado_id: employeeId,
+      incidente_id: incidentId,
+      decision: approved ? 'aprobado' : 'rechazado',
+      supervisor: supervisor.trim(),
+      texto_resolucion: resolutionText.trim(),
+    }, user);
+    return inc;
+  });
 }
 
 // ─── Sábados ─────────────────────────────────────────────────────────────────
@@ -311,32 +651,57 @@ async function resolveDescargo(employeeId, incidentId, approved, supervisor, res
 async function recordSaturdayWorked(employeeId, dateKey, hoursWorked, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
   if (hoursWorked <= 0) throw new Error('Las horas deben ser mayor a 0.');
-  const state = await store.load();
-  const emp = state.employees[employeeId];
-  if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
-  if (!state.saturdayEvents[dateKey]) {
-    state.saturdayEvents[dateKey] = { date: dateKey, intentions: [], assignments: [], records: [] };
-  }
-  state.saturdayEvents[dateKey].records.push({ employeeId, hours: hoursWorked, ts: now() });
-  emp.stats.horas_100 += hoursWorked;
-  emp.stats.sabados_trabajados += 1;
-  emp.reputation = Math.min(100, emp.reputation + APP_CONFIG.REPUTATION_RECOVERY.extra_cumplida);
-  applyMetadata(emp, user);
-  await store.save(state);
+  await updateState(state => {
+    const emp = state.employees[employeeId];
+    if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
+    const saturdayEvent = ensureSatEvent(state, dateKey);
+    saturdayEvent.records.push({ employeeId, hours: hoursWorked, ts: now() });
+    emp.stats.horas_100 += hoursWorked;
+    emp.stats.sabados_trabajados += 1;
+    applyPositiveReputation(emp, APP_CONFIG.REPUTATION_RECOVERY.extra_cumplida);
+    applyMetadata(emp, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.work_recorded',
+      entity: 'saturdayEvent',
+      entityId: dateKey,
+      before: {
+        empleado_id: employeeId,
+        horas_100: emp.stats.horas_100 - hoursWorked,
+        sabados_trabajados: emp.stats.sabados_trabajados - 1,
+      },
+      after: {
+        empleado_id: employeeId,
+        horas_100: emp.stats.horas_100,
+        sabados_trabajados: emp.stats.sabados_trabajados,
+        hoursWorked,
+      },
+      origin: 'saturday.record_worked',
+    }, user);
+  });
 }
 
 async function createSaturdayEvent(dateKey, { intentBy = [], supervisorAssigned = null }, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  if (!state.saturdayEvents[dateKey]) {
-    state.saturdayEvents[dateKey] = { date: dateKey, intentions: [], assignments: [], records: [] };
-  }
-  const ev = state.saturdayEvents[dateKey];
-  if (intentBy.length) ev.intentions.push(...intentBy.map(id => ({ employeeId: id, ts: now() })));
-  if (supervisorAssigned) ev.assignments.push({ supervisorAssigned, ts: now() });
-  applyMetadata(ev, user);
-  await store.save(state);
-  return ev;
+  return await updateState(state => {
+    const ev = ensureSatEvent(state, dateKey);
+    if (intentBy.length) ev.intentions.push(...intentBy.map(id => ({ employeeId: id, ts: now() })));
+    if (supervisorAssigned) ev.assignments.push({ supervisorAssigned, ts: now() });
+    applyMetadata(ev, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.event_created',
+      entity: 'saturdayEvent',
+      entityId: dateKey,
+      before: null,
+      after: {
+        dateKey,
+        intentions: ev.intentions.length,
+        assignments: ev.assignments.length,
+        supervisorAssigned: supervisorAssigned || null,
+      },
+      origin: 'saturday.event.create',
+    }, user);
+    return ev;
+  });
 }
 
 // ─── Horas hábiles ───────────────────────────────────────────────────────────
@@ -347,32 +712,65 @@ async function createSaturdayEvent(dateKey, { intentBy = [], supervisorAssigned 
  * Caso B: turno tarde  → +3 horas_100
  */
 async function recordWeekdayExtra(employeeId, user) {
-  const state = await store.load();
-  const emp = state.employees[employeeId];
-  if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
-  if (emp.turno_base === 'mañana') {
-    emp.stats.horas_50 += 3;
-  } else {
-    emp.stats.horas_100 += 3;
-  }
-  emp.reputation = Math.min(100, emp.reputation + APP_CONFIG.REPUTATION_RECOVERY.extra_cumplida);
-  applyMetadata(emp, user);
-  await store.save(state);
-  return emp;
+  return await updateState(state => {
+    const emp = state.employees[employeeId];
+    if (!emp) throw new Error('Empleado no encontrado: ' + employeeId);
+    const before = {
+      horas_50: emp.stats.horas_50,
+      horas_100: emp.stats.horas_100,
+      reputation: emp.reputation,
+      turno_base: emp.turno_base,
+    };
+    if (emp.turno_base === 'mañana') {
+      emp.stats.horas_50 += 3;
+    } else {
+      emp.stats.horas_100 += 3;
+    }
+    applyPositiveReputation(emp, APP_CONFIG.REPUTATION_RECOVERY.extra_cumplida);
+    applyMetadata(emp, user);
+    appendAuditLogEntry(state, {
+      operation: 'employee.weekday_extra_recorded',
+      entity: 'employee',
+      entityId: employeeId,
+      before,
+      after: {
+        horas_50: emp.stats.horas_50,
+        horas_100: emp.stats.horas_100,
+        reputation: emp.reputation,
+        turno_base: emp.turno_base,
+      },
+      origin: 'employees.weekday_extra',
+    }, user);
+    return emp;
+  });
 }
 
 // ─── Audit Logs ──────────────────────────────────────────────────────────────
 
 async function addAuditLog({ supervisor_id, chosen_employee, suggested_top, reason, note = '' }, user) {
-  const state = await store.load();
-  const log = {
-    id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    ts: now(), supervisor_id, chosen_employee, suggested_top, reason, note,
-  };
-  applyMetadata(log, user);
-  pushAudit(state, log);
-  await store.save(state);
-  return log;
+  return await updateState(state => {
+    const ts = now();
+    const entry = {
+      supervisor_id,
+      chosen_employee,
+      suggested_top,
+      reason,
+      note,
+      ts,
+      timestamp: ts,
+      createdAt: ts,
+    };
+    appendAuditLogEntry(state, {
+      operation: 'audit.manual_entry',
+      entity: 'auditLog',
+          entityId: generateEntityId(), // UUID ENTITY
+      before: null,
+      after: entry,
+      origin: 'audit.manual',
+      ...entry,
+    }, user);
+    return entry;
+  });
 }
 
 // ─── Ranking / Scoring ───────────────────────────────────────────────────────
@@ -383,13 +781,14 @@ async function addAuditLog({ supervisor_id, chosen_employee, suggested_top, reas
  * Menor score → mayor prioridad. Penalización +20 si confiabilidad < 0.5.
  */
 function computeScore(emp) {
+  if (!isRankingEnabled()) return { ...DISABLED_SCORE_META };
   const total_horas = (emp.stats.horas_50 || 0) + ((emp.stats.horas_100 || 0) * 2);
   const convocado = emp.stats.convocado || 0;
   const acepto = emp.stats.acepto || 0;
-  const reputationScore = emp.reputation || 0;
+  const reputationScore = getEmployeeReputation(emp);
   const confiabilidad = convocado === 0 ? 1 : (acepto / convocado);
   let score = (total_horas * 3) + convocado - (reputationScore * 0.5);
-  if (confiabilidad < 0.5 && convocado > 0) score += 20;
+  if (isPenaltyEnabled() && confiabilidad < 0.5 && convocado > 0) score += 20;
   if (!Number.isFinite(score)) {
     score = 0;
   }
@@ -397,6 +796,7 @@ function computeScore(emp) {
 }
 
 async function suggestionList() {
+  if (!isRankingEnabled()) return [];
   const state = await store.load();
   return state.employeesList
     .map(id => state.employees[id])
@@ -412,11 +812,29 @@ async function getSystemConfig() {
 }
 
 async function updateSystemConfig(patch, user) {
-  const state = await store.load();
-  Object.assign(state.systemConfig, patch);
-  applyMetadata(state.systemConfig, user, patch?.version);
-  await store.save(state);
-  return state.systemConfig;
+  return await updateState(state => {
+    const before = {
+      currentShiftWeek: state.systemConfig.currentShiftWeek,
+      shiftHistoryLength: (state.systemConfig.shiftHistory || []).length,
+      lastRecoveryMonth: state.systemConfig.lastRecoveryMonth || null,
+    };
+    Object.assign(state.systemConfig, patch);
+    applyMetadata(state.systemConfig, user, patch?.version);
+    appendAuditLogEntry(state, {
+      operation: 'config.updated',
+      entity: 'systemConfig',
+      entityId: 'systemConfig',
+      before,
+      after: {
+        currentShiftWeek: state.systemConfig.currentShiftWeek,
+        shiftHistoryLength: (state.systemConfig.shiftHistory || []).length,
+        lastRecoveryMonth: state.systemConfig.lastRecoveryMonth || null,
+      },
+      origin: 'config.update',
+      details: { changedKeys: Object.keys(patch || {}) },
+    }, user);
+    return state.systemConfig;
+  });
 }
 
 // ─── Export / Import ─────────────────────────────────────────────────────────
@@ -426,32 +844,281 @@ async function exportState() {
 }
 
 async function importState(data) {
-  if (!data || typeof data !== 'object') throw new Error('Datos inválidos.');
+  // Load current state for validations
+  const current = await store.load();
 
-  // FASE 3B / v1.2: Validación estructural (flexible para migración)
-  const requiredKeys = ['employees', 'callEvents', 'incidents', 'extraAssignments', 'saturdayEvents', 'auditLogs', 'systemConfig'];
-  for (const k of requiredKeys) {
-    if (!(k in data) || typeof data[k] !== 'object') {
-      const msj = 'El archivo no cumple con la estructura esperada: falta ' + k;
-      throw new Error(msj);
+  // Basic structural validation
+  if (!data || typeof data !== 'object') {
+    const err = new Error('IMPORT_VALIDATION_FAILED: payload must be an object');
+    err.code = 'IMPORT_VALIDATION_FAILED';
+    throw err;
+  }
+
+  // Minimal required top-level fields (allow partial imports but warn)
+  const minimalFields = ['employees', 'callEvents', 'systemConfig'];
+  for (const f of minimalFields) {
+    if (!(f in data)) {
+      // Partial import — treat as warning, not fatal
+      // We'll continue but record a warning later
+    } else if (data[f] === null || typeof data[f] !== 'object' || Array.isArray(data[f])) {
+      const err = new Error('IMPORT_VALIDATION_FAILED: top-level field ' + f + ' must be an object');
+      err.code = 'IMPORT_VALIDATION_FAILED';
+      throw err;
     }
   }
 
-  // Schema version y SaturdayData pueden faltar si es un respaldo antiguo, los inicializamos
-  if (!data.schemaVersion) data.schemaVersion = 1;
-  ensureSaturdayData(data);
+  if ('auditLogs' in data && !Array.isArray(data.auditLogs)) {
+    const err = new Error('IMPORT_VALIDATION_FAILED: auditLogs must be an array when provided');
+    err.code = 'IMPORT_VALIDATION_FAILED';
+    throw err;
+  }
 
-  await store.save(data);
+  if ('employeesList' in data && !Array.isArray(data.employeesList)) {
+    const err = new Error('IMPORT_VALIDATION_FAILED: employeesList must be an array when provided');
+    err.code = 'IMPORT_VALIDATION_FAILED';
+    throw err;
+  }
+
+  // Compatibility: missing schemaVersion means legacy => assume 1
+  const incomingSchema = ('schemaVersion' in data) ? data.schemaVersion : 1;
+
+  // Detect destructive intent: removing existing entities or replacing audit history
+  const destructiveReasons = [];
+  const currEmployees = new Set(Object.keys(current.employees || {}));
+  const incomingEmployees = new Set(Object.keys(data.employees || {}));
+  for (const id of currEmployees) {
+    if (!incomingEmployees.has(id)) {
+      destructiveReasons.push({ type: 'employee_deleted', id });
+    }
+  }
+
+  const currCallEvents = new Set(Object.keys(current.callEvents || {}));
+  const incomingCallEvents = new Set(Object.keys(data.callEvents || {}));
+  for (const id of currCallEvents) {
+    if (!incomingCallEvents.has(id)) destructiveReasons.push({ type: 'callEvent_deleted', id });
+  }
+
+  const currSat = new Set(Object.keys(current.saturdayEvents || {}));
+  const incomingSat = new Set(Object.keys(data.saturdayEvents || {}));
+  for (const id of currSat) {
+    if (!incomingSat.has(id)) destructiveReasons.push({ type: 'saturdayEvent_deleted', id });
+  }
+
+  const currNight = new Set(Object.keys(current.nightShiftEvents || {}));
+  const incomingNight = new Set(Object.keys(data.nightShiftEvents || {}));
+  for (const id of currNight) {
+    if (!incomingNight.has(id)) destructiveReasons.push({ type: 'nightShiftEvent_deleted', id });
+  }
+
+  if (Array.isArray(data.auditLogs)) {
+    const currAudit = Array.isArray(current.auditLogs) ? current.auditLogs : [];
+    // If incoming tries to shorten or modify the existing prefix of audit logs, block
+    if (data.auditLogs.length < currAudit.length) {
+      destructiveReasons.push({ type: 'audit_truncation', prevLen: currAudit.length, nextLen: data.auditLogs.length });
+    } else {
+      const min = Math.min(currAudit.length, data.auditLogs.length);
+      for (let i = 0; i < min; i += 1) {
+        if (!valuesEqual(currAudit[i], data.auditLogs[i])) {
+          destructiveReasons.push({ type: 'audit_history_replaced', index: i });
+          break;
+        }
+      }
+    }
+  }
+
+  if (destructiveReasons.length > 0) {
+    // Emit an audit entry describing the blocked destructive import, then fail
+    try {
+      await updateState(state => {
+        appendAuditLogEntry(state, {
+          operation: 'import.destructive_blocked',
+          entity: 'system',
+          entityId: 'root',
+          origin: 'import.json',
+          details: { destructiveReasons, incomingSchema: incomingSchema ?? null },
+        });
+        return skipStateWrite();
+      });
+    } catch (e) {
+      // best-effort: even if we fail to log, we still block
+      console.error('[IMPORT_LOG_ERROR]', e);
+    }
+
+    const err = new Error('IMPORT_DESTRUCTIVE_BLOCKED: incoming payload would remove or replace existing data');
+    err.code = 'IMPORT_DESTRUCTIVE_BLOCKED';
+    err.details = destructiveReasons;
+    throw err;
+  }
+
+  // Proceed with a safe merge strategy (no silent overwrites)
+  const importedAuditLogs = Array.isArray(data.auditLogs) ? data.auditLogs.slice() : [];
+
+  const importedAuditLogsIgnored = importedAuditLogs.length;
+  const resultSummary = {
+    added: { employees: 0, callEvents: 0, saturdayEvents: 0, nightShiftEvents: 0 },
+    ignored: { auditLogs: importedAuditLogsIgnored },
+    conflicts: [],
+    auditAppended: 0,
+    warnings: [],
+  };
+
+  // Perform merge inside an atomic updateState so adapters can generate granular ops
+  const summary = await updateState(state => {
+    // Work on draft 'state'
+    // Merge employees: add new; if id exists and differs -> record conflict and do not overwrite
+    state.employees = state.employees || {};
+    state.employeesList = Array.isArray(state.employeesList) ? state.employeesList : Object.keys(state.employees);
+
+    const incomingEmps = data.employees || {};
+    for (const [rawId, inc] of Object.entries(incomingEmps)) {
+      const id = String(rawId);
+      const incClone = structuredClone(inc || {});
+      ensureEntityId(incClone, 'emp', id);
+      if (!(id in state.employees)) {
+        // New employee — add and record
+        state.employees[id] = incClone;
+        if (!state.employeesList.includes(id)) state.employeesList.push(id);
+        resultSummary.added.employees += 1;
+      } else {
+        // Existing — detect conflict
+        if (!valuesEqual(state.employees[id], incClone)) {
+          resultSummary.conflicts.push({ type: 'employee', id });
+          resultSummary.warnings.push('Employee conflict: ' + id);
+          // preserve existing entity, do not overwrite silently
+        }
+      }
+    }
+
+    // Merge callEvents
+    state.callEvents = state.callEvents || {};
+    const incomingCalls = data.callEvents || {};
+    for (const [rawId, inc] of Object.entries(incomingCalls)) {
+      const id = String(rawId);
+      const incClone = structuredClone(inc || {});
+      ensureEntityId(incClone, 'call', id);
+      if (!(id in state.callEvents)) {
+        state.callEvents[id] = incClone;
+        resultSummary.added.callEvents += 1;
+      } else if (!valuesEqual(state.callEvents[id], incClone)) {
+        resultSummary.conflicts.push({ type: 'callEvent', id });
+        resultSummary.warnings.push('CallEvent conflict: ' + id);
+      }
+    }
+
+    // Merge saturdayEvents
+    state.saturdayEvents = state.saturdayEvents || {};
+    const incomingSat = data.saturdayEvents || {};
+    for (const [rawId, inc] of Object.entries(incomingSat)) {
+      const id = String(rawId);
+      const incClone = structuredClone(inc || {});
+      ensureEntityId(incClone, 'sat', id);
+      if (!incClone.date) incClone.date = id;
+      if (!(id in state.saturdayEvents)) {
+        state.saturdayEvents[id] = incClone;
+        resultSummary.added.saturdayEvents += 1;
+      } else if (!valuesEqual(state.saturdayEvents[id], incClone)) {
+        resultSummary.conflicts.push({ type: 'saturdayEvent', id });
+        resultSummary.warnings.push('SaturdayEvent conflict: ' + id);
+      }
+    }
+
+    // Merge nightShiftEvents
+    state.nightShiftEvents = state.nightShiftEvents || {};
+    const incomingNightEv = data.nightShiftEvents || {};
+    for (const [rawId, inc] of Object.entries(incomingNightEv)) {
+      const id = String(rawId);
+      const incClone = structuredClone(inc || {});
+      ensureEntityId(incClone, 'night', id);
+      if (!(id in state.nightShiftEvents)) {
+        state.nightShiftEvents[id] = incClone;
+        resultSummary.added.nightShiftEvents += 1;
+      } else if (!valuesEqual(state.nightShiftEvents[id], incClone)) {
+        resultSummary.conflicts.push({ type: 'nightShiftEvent', id });
+        resultSummary.warnings.push('NightShiftEvent conflict: ' + id);
+      }
+    }
+
+    // Merge saturdayData shallowly (preserve createdAt/history)
+    if (data.saturdayData && typeof data.saturdayData === 'object') {
+      state.saturdayData = state.saturdayData || structuredClone(INITIAL_STATE.saturdayData);
+      state.saturdayData = {
+        ...state.saturdayData,
+        ...(data.saturdayData ?? {}),
+        employees: { ...(state.saturdayData?.employees ?? {}), ...(data.saturdayData?.employees ?? {}) },
+        events: Array.isArray(data.saturdayData?.events) ? Array.from(new Set([...(state.saturdayData?.events || []), ...data.saturdayData.events])) : (state.saturdayData.events || []),
+        config: { ...state.saturdayData.config, ...(data.saturdayData?.config ?? {}) },
+      };
+    }
+
+    // Merge weekAvailability shallowly
+    if (data.weekAvailability && typeof data.weekAvailability === 'object') {
+      state.weekAvailability = { ...(state.weekAvailability || {}), ...(data.weekAvailability || {}) };
+    }
+
+    // Append audit logs safely: compute appended logs and append
+    const appended = getAppendedAuditLogs(state.auditLogs || [], importedAuditLogs || []);
+    if (Array.isArray(appended) && appended.length > 0) {
+      state.auditLogs = mergeAuditLogsAppendOnly(state.auditLogs || [], appended);
+      resultSummary.auditAppended = appended.length;
+    }
+
+    // Merge systemConfig (prefer existing values when conflicts)
+    if (data.systemConfig && typeof data.systemConfig === 'object') {
+      state.systemConfig = { ...state.systemConfig, ...(data.systemConfig || {}) };
+    }
+
+    // Build employeesList as union preserving current order
+    const unionEmpIds = Array.from(new Set([...(state.employeesList || []), ...Object.keys(state.employees || {})]));
+    state.employeesList = unionEmpIds;
+
+    // Final audit entry describing the import summary
+    const importTs = now();
+    appendAuditLogEntry(state, {
+      operation: 'state.imported',
+      entity: 'system',
+      entityId: 'root',
+      origin: 'import.json',
+      details: {
+        summary: resultSummary,
+        incomingSchema: incomingSchema ?? null,
+      },
+      before: null,
+      after: null,
+      ts: importTs,
+      timestamp: importTs,
+      createdAt: importTs,
+    });
+
+    // Return the summary as the result of updateState
+    return resultSummary;
+  });
+
+  // Return the summary to caller
+  return summary;
 }
 
 // ─── Sábados: intenciones y asignaciones individuales ─────────────────────────
 
 function ensureSatEvent(state, dateKey) {
   if (!state.saturdayEvents[dateKey]) {
-    state.saturdayEvents[dateKey] = { date: dateKey, intentions: [], assignedEmployees: [], assignments: [], records: [] };
+    const ts = now();
+    state.saturdayEvents[dateKey] = { id: generateId('sat'), date: dateKey, intentions: [], assignedEmployees: [], assignments: [], records: [], createdAt: ts, timestamp: ts };
+  }
+  if (!Array.isArray(state.saturdayEvents[dateKey].intentions)) {
+    state.saturdayEvents[dateKey].intentions = [];
   }
   if (!state.saturdayEvents[dateKey].assignedEmployees) {
     state.saturdayEvents[dateKey].assignedEmployees = [];
+  }
+  if (!Array.isArray(state.saturdayEvents[dateKey].assignments)) {
+    state.saturdayEvents[dateKey].assignments = [];
+  }
+  if (!Array.isArray(state.saturdayEvents[dateKey].records)) {
+    state.saturdayEvents[dateKey].records = [];
+  }
+  if (!state.saturdayEvents[dateKey].id) {
+    state.saturdayEvents[dateKey].id = generateId('sat');
+    if (!state.saturdayEvents[dateKey].createdAt) state.saturdayEvents[dateKey].createdAt = state.saturdayEvents[dateKey].ts || state.saturdayEvents[dateKey].timestamp || now();
   }
   return state.saturdayEvents[dateKey];
 }
@@ -462,26 +1129,44 @@ function ensureSatEvent(state, dateKey) {
  */
 async function addSaturdayIntention(dateKey, employeeId, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  if (!state.employees[employeeId]) throw new Error('Empleado no encontrado: ' + employeeId);
-  const ev = ensureSatEvent(state, dateKey);
-  if (ev.intentions.some(i => i.employeeId === employeeId)) {
-    throw new Error('El empleado ya manifestó intención para ese sábado.');
-  }
-  ev.intentions.push({ employeeId, ts: now() });
-  applyMetadata(ev, user);
-  applyMetadata(state.employees[employeeId], user);
-  await store.save(state);
+  await updateState(state => {
+    if (!state.employees[employeeId]) throw new Error('Empleado no encontrado: ' + employeeId);
+    const ev = ensureSatEvent(state, dateKey);
+    if (ev.intentions.some(i => i.employeeId === employeeId)) {
+      throw new Error('El empleado ya manifestó intención para ese sábado.');
+    }
+    ev.intentions.push({ employeeId, ts: now() });
+    applyMetadata(ev, user);
+    applyMetadata(state.employees[employeeId], user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.intention_added',
+      entity: 'saturdayEvent',
+      entityId: dateKey,
+      before: { employeeId, intentions: ev.intentions.length - 1 },
+      after: { employeeId, intentions: ev.intentions.length },
+      origin: 'saturday.intention.add',
+    }, user);
+  });
 }
 
 /** Elimina la intención de un empleado para un sábado. */
 async function removeSaturdayIntention(dateKey, employeeId, user) {
-  const state = await store.load();
-  const ev = state.saturdayEvents?.[dateKey];
-  if (!ev) return;
-  ev.intentions = (ev.intentions || []).filter(i => i.employeeId !== employeeId);
-  applyMetadata(ev, user);
-  await store.save(state);
+  await updateState(state => {
+    const ev = state.saturdayEvents?.[dateKey];
+    if (!ev) return skipStateWrite();
+    const beforeCount = (ev.intentions || []).length;
+    ev.intentions = (ev.intentions || []).filter(i => i.employeeId !== employeeId);
+    if ((ev.intentions || []).length === beforeCount) return skipStateWrite();
+    applyMetadata(ev, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.intention_removed',
+      entity: 'saturdayEvent',
+      entityId: dateKey,
+      before: { employeeId, intentions: beforeCount },
+      after: { employeeId, intentions: ev.intentions.length },
+      origin: 'saturday.intention.remove',
+    }, user);
+  });
 }
 
 /**
@@ -490,16 +1175,24 @@ async function removeSaturdayIntention(dateKey, employeeId, user) {
  */
 async function assignEmployeeToSaturday(dateKey, employeeId, supervisorId, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  if (!state.employees[employeeId]) throw new Error('Empleado no encontrado: ' + employeeId);
-  const ev = ensureSatEvent(state, dateKey);
-  if (ev.assignedEmployees.some(a => a.employeeId === employeeId)) {
-    throw new Error('El empleado ya está asignado a ese sábado.');
-  }
-  ev.assignedEmployees.push({ employeeId, supervisorId: supervisorId || '', ts: now() });
-  applyMetadata(ev, user);
-  applyMetadata(state.employees[employeeId], user);
-  await store.save(state);
+  await updateState(state => {
+    if (!state.employees[employeeId]) throw new Error('Empleado no encontrado: ' + employeeId);
+    const ev = ensureSatEvent(state, dateKey);
+    if (ev.assignedEmployees.some(a => a.employeeId === employeeId)) {
+      throw new Error('El empleado ya está asignado a ese sábado.');
+    }
+    ev.assignedEmployees.push({ employeeId, supervisorId: supervisorId || '', ts: now() });
+    applyMetadata(ev, user);
+    applyMetadata(state.employees[employeeId], user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.assignment_added',
+      entity: 'saturdayEvent',
+      entityId: dateKey,
+      before: { employeeId, assignments: ev.assignedEmployees.length - 1 },
+      after: { employeeId, assignments: ev.assignedEmployees.length, supervisorId: supervisorId || '' },
+      origin: 'saturday.assignment.add',
+    }, user);
+  });
 }
 
 /**
@@ -510,32 +1203,52 @@ async function assignEmployeeToSaturday(dateKey, employeeId, supervisorId, user)
  * @returns {Promise<number>} cantidad de entradas eliminadas
  */
 async function removeEmployeeIntent(employeeId, date) {
-  const state = await store.load();
-  ensureSaturdayData(state);
-  const empId = String(employeeId);
-  const before = (state.saturdayData.events || []).length;
-  state.saturdayData.events = (state.saturdayData.events || []).filter(
-    ev => !(ev.empleado_id === empId && ev.fechaSabado === date && ev.estado === 'anotado')
-  );
-  const removed = before - state.saturdayData.events.length;
-  if (removed > 0) {
+  return await updateState(state => {
+    ensureSaturdayData(state);
+    const empId = String(employeeId);
+    const before = (state.saturdayData.events || []).length;
+    state.saturdayData.events = (state.saturdayData.events || []).filter(
+      ev => !(normalizeId(ev.empleado_id) === normalizeId(empId) && ev.fechaSabado === date && ev.estado === 'anotado')
+    );
+    const removed = before - state.saturdayData.events.length;
+    if (removed === 0) {
+      return skipStateWrite(0);
+    }
     const stats = state.saturdayData.employees[empId];
     if (stats) {
       stats.sabados_anotados = Math.max(0, (stats.sabados_anotados || 0) - removed);
     }
-    await store.save(state);
-  }
-  return removed;
+    appendAuditLogEntry(state, {
+      operation: 'saturday.annotation_removed',
+      entity: 'saturdayAnnotation',
+      entityId: `${empId}:${date}`,
+      before: { employeeId: empId, fechaSabado: date, anotacionesEliminadas: removed },
+      after: { employeeId: empId, fechaSabado: date, anotacionesEliminadas: 0 },
+      origin: 'saturday.annotation.remove',
+      details: { removed },
+    });
+    return removed;
+  });
 }
 
 /** Cancela la asignación de un empleado a un sábado. */
 async function removeAssignmentFromSaturday(dateKey, employeeId, user) {
-  const state = await store.load();
-  const ev = state.saturdayEvents?.[dateKey];
-  if (!ev) return;
-  ev.assignedEmployees = (ev.assignedEmployees || []).filter(a => a.employeeId !== employeeId);
-  applyMetadata(ev, user);
-  await store.save(state);
+  await updateState(state => {
+    const ev = state.saturdayEvents?.[dateKey];
+    if (!ev) return skipStateWrite();
+    const beforeCount = (ev.assignedEmployees || []).length;
+    ev.assignedEmployees = (ev.assignedEmployees || []).filter(a => a.employeeId !== employeeId);
+    if ((ev.assignedEmployees || []).length === beforeCount) return skipStateWrite();
+    applyMetadata(ev, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.assignment_removed',
+      entity: 'saturdayEvent',
+      entityId: dateKey,
+      before: { employeeId, assignments: beforeCount },
+      after: { employeeId, assignments: ev.assignedEmployees.length },
+      origin: 'saturday.assignment.remove',
+    }, user);
+  });
 }
 
 // ─── Turno Noche Excepcional (Fase 3C) ─────────────────────────────────────
@@ -544,6 +1257,7 @@ function ensureNightEvent(state, dateKey) {
   if (!state.nightShiftEvents) state.nightShiftEvents = {};
   if (!state.nightShiftEvents[dateKey]) {
     state.nightShiftEvents[dateKey] = {
+      id: generateId('night'),
       fecha: dateKey,
       sectores_activados: [],
       supervisor_id: null,
@@ -557,193 +1271,180 @@ function ensureNightEvent(state, dateKey) {
       }
     };
   }
+  if (!Array.isArray(state.nightShiftEvents[dateKey].personal)) {
+    state.nightShiftEvents[dateKey].personal = [];
+  }
+  if (!state.nightShiftEvents[dateKey].logistica || typeof state.nightShiftEvents[dateKey].logistica !== 'object') {
+    state.nightShiftEvents[dateKey].logistica = { total_menus: 0, total_gaseosas: 0, total_remises: 0, costo_estimado: 0 };
+  }
+  if (!state.nightShiftEvents[dateKey].id) {
+    state.nightShiftEvents[dateKey].id = generateId('night');
+  }
   return state.nightShiftEvents[dateKey];
 }
 
 async function createNightShiftEvent(dateKey, sectores = [], supervisor_id = null, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  const ev = ensureNightEvent(state, dateKey);
-  ev.sectores_activados = Array.isArray(sectores) ? sectores.slice() : [];
-  ev.supervisor_id = supervisor_id || null;
-  ev.estado = 'planificado';
-  ev.personal = ev.personal || [];
-  ev.logistica = ev.logistica || { total_menus: 0, total_gaseosas: 0, total_remises: 0, costo_estimado: 0 };
-  // unique id for event
-  if (!ev.id) ev.id = 'NS-' + dateKey.replace(/_/g, '') + '-' + Date.now();
-  // audit log: created
-  pushAudit(state, { tipo: 'night_shift_created', fecha_evento: ev.fecha, supervisor_id: ev.supervisor_id || null });
-  applyMetadata(ev, user);
-  await store.save(state);
-  return ev;
+  return await updateState(state => {
+    const ev = ensureNightEvent(state, dateKey);
+    ev.sectores_activados = Array.isArray(sectores) ? sectores.slice() : [];
+    ev.supervisor_id = supervisor_id || null;
+    ev.estado = 'planificado';
+    ev.personal = ev.personal || [];
+    ev.logistica = ev.logistica || { total_menus: 0, total_gaseosas: 0, total_remises: 0, costo_estimado: 0 };
+    pushAudit(state, { tipo: 'night_shift_created', fecha_evento: ev.fecha, supervisor_id: ev.supervisor_id || null });
+    applyMetadata(ev, user);
+    return ev;
+  });
 }
 
 async function addNightShiftPerson(dateKey, empleado_id, data = {}, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  const ev = state.nightShiftEvents?.[dateKey];
-  if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
-  if (ev.estado === 'cerrado') throw new Error('No se pueden agregar personas a un evento cerrado.');
+  return await updateState(state => {
+    const ev = state.nightShiftEvents?.[dateKey];
+    if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
+    if (ev.estado === 'cerrado') throw new Error('No se pueden agregar personas a un evento cerrado.');
 
-  const emp = state.employees[empleado_id];
-  if (!emp || !emp.activo) throw new Error('Empleado no válido o inactivo.');
+    const emp = state.employees[empleado_id];
+    if (!emp || !emp.activo) throw new Error('Empleado no válido o inactivo.');
 
-  if (!ev.personal || !Array.isArray(ev.personal)) throw new Error('Estructura inválida en nightShiftEvent');
-  ev.personal = ev.personal || [];
-  // Prevent duplicates strictly
-  if (ev.personal.some(p => p.empleado_id === empleado_id)) {
-    throw new Error('El empleado ya está asignado al evento.');
-  }
-
-  // Max persons limit
-  const maxP = NIGHT_SHIFT_CONFIG.max_personas_por_evento || 40;
-  if ((ev.personal.length + 1) > maxP) {
-    throw new Error('Se alcanzó el máximo permitido de personas para este evento.');
-  }
-
-  // Remis validation
-  if (data.requiere_remis) {
-    const dir = (data.direccion || '').trim();
-    if (!dir || dir.length < 3) throw new Error('Dirección inválida para remis.');
-  }
-
-  // Strong validation against centralized structure (only for new inputs)
-  const sectorVal = (data.sector || '').trim();
-  const funcVal = (data.funcion || '').trim();
-  if (!sectorVal) throw new Error('Sector es requerido.');
-  // Accept sector if it's defined in NIGHT_SHIFT_STRUCTURE OR if the event declares custom sectores_activados (back-compat)
-  const allowedSectors = new Set(Object.keys(NIGHT_SHIFT_STRUCTURE || {}));
-  const eventDeclaredSectors = new Set(ev.sectores_activados || []);
-  const sectorAllowed = allowedSectors.has(sectorVal) || eventDeclaredSectors.has(sectorVal);
-  if (!sectorAllowed) {
-    throw new Error('Sector inválido para Turno Noche: ' + sectorVal);
-  }
-  if (!funcVal) throw new Error('Función es requerida.');
-  // If sector is known in the centralized structure, enforce function membership.
-  if (NIGHT_SHIFT_STRUCTURE && NIGHT_SHIFT_STRUCTURE[sectorVal]) {
-    if (!NIGHT_SHIFT_STRUCTURE[sectorVal].includes(funcVal)) {
-      throw new Error('Función inválida para el sector ' + sectorVal + ': ' + funcVal);
+    if (!ev.personal || !Array.isArray(ev.personal)) throw new Error('Estructura inválida en nightShiftEvent');
+    ev.personal = ev.personal || [];
+    if (ev.personal.some(p => normalizeId(p.empleado_id) === normalizeId(empleado_id))) {
+      throw new Error('El empleado ya está asignado al evento.');
     }
-  }
 
-  const person = {
-    empleado_id,
-    sector: sectorVal,
-    funcion: funcVal,
-    menu: data.menu || 'comun',
-    requiere_remis: !!data.requiere_remis,
-    direccion: data.direccion || '',
-    supervisor: !!data.supervisor,
-    // seguridad must be excluded from hours computation
-    computable_horas: sectorVal === 'seguridad' ? false : true
-  };
-  ev.personal.push(person);
-  // audit log: person added
-  pushAudit(state, { tipo: 'night_shift_person_added', fecha_evento: ev.fecha, empleado_id: empleado_id, supervisor_id: ev.supervisor_id || null });
-  applyMetadata(ev, user);
-  applyMetadata(emp, user);
-  await store.save(state);
-  return person;
+    const maxP = NIGHT_SHIFT_CONFIG.max_personas_por_evento || 40;
+    if ((ev.personal.length + 1) > maxP) {
+      throw new Error('Se alcanzó el máximo permitido de personas para este evento.');
+    }
+
+    if (data.requiere_remis) {
+      const dir = (data.direccion || '').trim();
+      if (!dir || dir.length < 3) throw new Error('Dirección inválida para remis.');
+    }
+
+    const sectorVal = (data.sector || '').trim();
+    const funcVal = (data.funcion || '').trim();
+    if (!sectorVal) throw new Error('Sector es requerido.');
+    const allowedSectors = new Set(Object.keys(NIGHT_SHIFT_STRUCTURE || {}));
+    const eventDeclaredSectors = new Set(ev.sectores_activados || []);
+    const sectorAllowed = allowedSectors.has(sectorVal) || eventDeclaredSectors.has(sectorVal);
+    if (!sectorAllowed) {
+      throw new Error('Sector inválido para Turno Noche: ' + sectorVal);
+    }
+    if (!funcVal) throw new Error('Función es requerida.');
+    if (NIGHT_SHIFT_STRUCTURE && NIGHT_SHIFT_STRUCTURE[sectorVal]) {
+      if (!NIGHT_SHIFT_STRUCTURE[sectorVal].includes(funcVal)) {
+        throw new Error('Función inválida para el sector ' + sectorVal + ': ' + funcVal);
+      }
+    }
+
+    const person = {
+      empleado_id,
+      sector: sectorVal,
+      funcion: funcVal,
+      menu: data.menu || 'comun',
+      requiere_remis: !!data.requiere_remis,
+      direccion: data.direccion || '',
+      supervisor: !!data.supervisor,
+      computable_horas: sectorVal === 'seguridad' ? false : true
+    };
+    ev.personal.push(person);
+    pushAudit(state, { tipo: 'night_shift_person_added', fecha_evento: ev.fecha, empleado_id: empleado_id, supervisor_id: ev.supervisor_id || null });
+    applyMetadata(ev, user);
+    applyMetadata(emp, user);
+    return person;
+  });
 }
 
 async function removeNightShiftPerson(dateKey, empleado_id, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  const ev = state.nightShiftEvents?.[dateKey];
-  if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
-  if (ev.estado === 'cerrado') throw new Error('No se pueden eliminar personas de un evento cerrado.');
-  if (!ev.personal || !Array.isArray(ev.personal)) throw new Error('Estructura inválida en nightShiftEvent');
-  const before = ev.personal?.length || 0;
-  ev.personal = (ev.personal || []).filter(p => p.empleado_id !== empleado_id);
-  if ((ev.personal?.length || 0) === before) return null;
-  // audit log: person removed
-  pushAudit(state, { tipo: 'night_shift_person_removed', fecha_evento: ev.fecha, empleado_id, supervisor_id: ev.supervisor_id || null });
-  applyMetadata(ev, user);
-  await store.save(state);
-  return true;
+  return await updateState(state => {
+    const ev = state.nightShiftEvents?.[dateKey];
+    if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
+    if (ev.estado === 'cerrado') throw new Error('No se pueden eliminar personas de un evento cerrado.');
+    if (!ev.personal || !Array.isArray(ev.personal)) throw new Error('Estructura inválida en nightShiftEvent');
+    const before = ev.personal?.length || 0;
+    ev.personal = (ev.personal || []).filter(p => p.empleado_id !== empleado_id);
+    if ((ev.personal?.length || 0) === before) return skipStateWrite(null);
+    pushAudit(state, { tipo: 'night_shift_person_removed', fecha_evento: ev.fecha, empleado_id, supervisor_id: ev.supervisor_id || null });
+    applyMetadata(ev, user);
+    return true;
+  });
 }
 
 async function closeNightShiftEvent(dateKey, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  const ev = state.nightShiftEvents?.[dateKey];
-  if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
-  if (!ev.personal || !Array.isArray(ev.personal)) throw new Error('Estructura inválida en nightShiftEvent');
-  if (ev.estado !== 'planificado') throw new Error('Solo se puede cerrar un evento en estado planificado.');
-  if (ev.horas_aplicadas === true) throw new Error('Las horas ya fueron aplicadas para este evento; cierre no permitido.');
-  const persons = ev.personal || [];
-  if (!persons.length) throw new Error('No se puede cerrar un evento sin personal.');
-  // Soft policy: detect presence of supervisor but DO NOT block closure yet.
-  const tieneSupervisor = (persons || []).some(p => (p.funcion === 'supervisor') || (p.supervisor === true));
-  // Sumar horas a empleados no supervisor y que sean computables (ej. seguridad no computable)
-  for (const p of persons) {
-    const computable = p.computable_horas === false ? false : true; // default true for legacy entries
-    if (!p.supervisor && computable) {
-      const emp = state.employees[p.empleado_id];
-      if (emp) {
-        emp.stats.horas_100 = (emp.stats.horas_100 || 0) + (NIGHT_SHIFT_CONFIG.horas_por_evento || 0);
-        applyMetadata(emp, user);
+  return await updateState(state => {
+    const ev = state.nightShiftEvents?.[dateKey];
+    if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
+    if (!ev.personal || !Array.isArray(ev.personal)) throw new Error('Estructura inválida en nightShiftEvent');
+    if (ev.estado !== 'planificado') throw new Error('Solo se puede cerrar un evento en estado planificado.');
+    if (ev.horas_aplicadas === true) throw new Error('Las horas ya fueron aplicadas para este evento; cierre no permitido.');
+    const persons = ev.personal || [];
+    if (!persons.length) throw new Error('No se puede cerrar un evento sin personal.');
+    for (const p of persons) {
+      const computable = p.computable_horas === false ? false : true;
+      if (!p.supervisor && computable) {
+        const emp = state.employees[p.empleado_id];
+        if (emp) {
+          emp.stats.horas_100 = (emp.stats.horas_100 || 0) + (NIGHT_SHIFT_CONFIG.horas_por_evento || 0);
+          applyMetadata(emp, user);
+        }
       }
     }
-  }
 
-  // Logistica
-  const total_personal = persons.length;
-  const total_menus = total_personal;
-  const total_gaseosas = total_personal * (NIGHT_SHIFT_CONFIG.gaseosas_por_persona || 0);
-  // Agrupar remises por direccion única donde requiere_remis === true
-  const direcciones = new Set();
-  for (const p of persons) {
-    if (p.requiere_remis && p.direccion && p.direccion.trim()) direcciones.add(p.direccion.trim());
-  }
-  const total_remises = direcciones.size;
+    const total_personal = persons.length;
+    const total_menus = total_personal;
+    const total_gaseosas = total_personal * (NIGHT_SHIFT_CONFIG.gaseosas_por_persona || 0);
+    const direcciones = new Set();
+    for (const p of persons) {
+      if (p.requiere_remis && p.direccion && p.direccion.trim()) direcciones.add(p.direccion.trim());
+    }
+    const total_remises = direcciones.size;
 
-  const costo = (total_menus * (NIGHT_SHIFT_CONFIG.costo_menu || 0))
-    + (total_gaseosas * (NIGHT_SHIFT_CONFIG.costo_gaseosa || 0))
-    + (total_remises * (NIGHT_SHIFT_CONFIG.costo_remis_base || 0));
+    const costo = (total_menus * (NIGHT_SHIFT_CONFIG.costo_menu || 0))
+      + (total_gaseosas * (NIGHT_SHIFT_CONFIG.costo_gaseosa || 0))
+      + (total_remises * (NIGHT_SHIFT_CONFIG.costo_remis_base || 0));
 
-  ev.logistica = {
-    total_menus,
-    total_gaseosas,
-    total_remises,
-    costo_estimado: costo
-  };
+    ev.logistica = {
+      total_menus,
+      total_gaseosas,
+      total_remises,
+      costo_estimado: costo
+    };
 
-  // Mark hours applied and snapshot final state (immutable historical snapshot)
-  const computableNonSupCount = persons.filter(p => (!p.supervisor) && (p.computable_horas === undefined || p.computable_horas === true)).length;
-  const total_horas_pagadas = computableNonSupCount * (NIGHT_SHIFT_CONFIG.horas_por_evento || 0);
+    const computableNonSupCount = persons.filter(p => (!p.supervisor) && (p.computable_horas === undefined || p.computable_horas === true)).length;
+    const total_horas_pagadas = computableNonSupCount * (NIGHT_SHIFT_CONFIG.horas_por_evento || 0);
 
-  ev.horas_aplicadas = true;
-  ev.estado = 'cerrado';
-  ev.snapshot = {
-    total_personas: total_personal,
-    total_horas_pagadas,
-    total_remises,
-    costo_estimado: costo,
-    sectores_activados: ev.sectores_activados ? ev.sectores_activados.slice() : [],
-    timestamp_cierre: now()
-  };
-  applyMetadata(ev, user);
+    ev.horas_aplicadas = true;
+    ev.estado = 'cerrado';
+    ev.snapshot = {
+      total_personas: total_personal,
+      total_horas_pagadas,
+      total_remises,
+      costo_estimado: costo,
+      sectores_activados: ev.sectores_activados ? ev.sectores_activados.slice() : [],
+      timestamp_cierre: now()
+    };
+    applyMetadata(ev, user);
 
-  // Auditoría: registrar cierre
-  const audit = {
-    id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    ts: now(),
-    timestamp: now(),
-    tipo: 'night_shift_closed',
-    fecha_evento: ev.fecha,
-    supervisor_id: ev.supervisor_id || null,
-    cerrado_por: 'ADMIN_LOCAL',
-    total_personas: total_personal,
-    total_horas_pagadas: persons.filter(p => (!p.supervisor) && (p.computable_horas === undefined || p.computable_horas === true)).length * (NIGHT_SHIFT_CONFIG.horas_por_evento || 0),
-    total_remises: total_remises,
-    costo_estimado: costo
-  };
-  pushAudit(state, audit);
-  applyMetadata(audit, user);
-
-  await store.save(state);
-  return ev;
+    const audit = {
+      ts: now(),
+      tipo: 'night_shift_closed',
+      fecha_evento: ev.fecha,
+      supervisor_id: ev.supervisor_id || null,
+      cerrado_por: 'ADMIN_LOCAL',
+      total_personas: total_personal,
+      total_horas_pagadas,
+      total_remises: total_remises,
+      costo_estimado: costo
+    };
+    applyMetadata(audit, user);
+    pushAudit(state, audit);
+    return ev;
+  });
 }
 
 async function getNightShiftMonthlyStats(yearMonth) {
@@ -775,6 +1476,20 @@ async function getNightShiftMonthlyStats(yearMonth) {
 }
 
 async function getNightShiftAdvancedStats(yearMonth) {
+  if (!isAdvancedStatsEnabled()) {
+    return {
+      total_eventos: 0,
+      promedio_personas_por_evento: 0,
+      total_horas_100_pagadas: 0,
+      promedio_costo_por_evento: 0,
+      costo_total_mes: 0,
+      sector_mas_utilizado: null,
+      empleado_mas_participaciones: { name: null, count: 0 },
+      indice_saturacion: 0,
+      semanas_del_mes: 0,
+      disabled: true,
+    };
+  }
   if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) throw new Error('yearMonth debe tener formato YYYY-MM');
   const state = await store.load();
   const monthKey = yearMonth.slice(0, 4) + '_' + yearMonth.slice(5, 7);
@@ -866,76 +1581,68 @@ async function getNightShiftAdvancedStats(yearMonth) {
 
 async function reopenNightShiftEvent(dateKey, user) {
   if (!dateKey || !/^\d{4}_\d{2}_\d{2}$/.test(dateKey)) throw new Error('dateKey debe tener formato YYYY_MM_DD');
-  const state = await store.load();
-  const ev = state.nightShiftEvents?.[dateKey];
-  if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
-  if (ev.estado !== 'cerrado') throw new Error('Solo se puede reabrir un evento cerrado.');
-  // If hours were applied, attempt to rollback applied hours to employees
-  if (ev.horas_aplicadas === true) {
-    // Revert hours previously added during closeNightShiftEvent
-    const persons = ev.personal || [];
-    for (const p of persons) {
-      const computable = p.computable_horas === false ? false : true;
-      if (!p.supervisor && computable) {
-        const emp = state.employees[p.empleado_id];
-        if (emp && emp.stats && typeof emp.stats.horas_100 === 'number') {
-          emp.stats.horas_100 = Math.max(0, (emp.stats.horas_100 || 0) - (NIGHT_SHIFT_CONFIG.horas_por_evento || 0));
-          applyMetadata(emp, user);
-        }
-      }
-    }
-    // remove snapshot and mark hours as not applied
-    delete ev.snapshot;
-    ev.horas_aplicadas = false;
-  }
-  // Only allow reopening if event belongs to current month
-  const nowDate = new Date();
-  const currentMonthKey = nowDate.toISOString().slice(0, 7).replace('-', '_'); // YYYY_MM
-  if (!ev.fecha.startsWith(currentMonthKey)) throw new Error('Solo se pueden reabrir eventos del mes actual.');
-
-  ev.estado = 'planificado';
-  applyMetadata(ev, user);
-  const audit = {
-    id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    ts: now(),
-    timestamp: now(),
-    tipo: 'night_shift_reopened',
-    fecha_evento: ev.fecha,
-    supervisor_id: ev.supervisor_id || null
-  };
-  pushAudit(state, audit);
-  applyMetadata(audit, user);
-
-  await store.save(state);
-  return ev;
-}
-
-async function cleanupOldEmptyNightEvents() {
-  const state = await store.load();
-  const nowTs = Date.now();
-  let changed = false;
-  for (const [k, ev] of Object.entries(state.nightShiftEvents || {})) {
-    try {
-      if (ev && ev.estado === 'planificado' && (!ev.personal || ev.personal.length === 0)) {
-        // parse fecha YYYY_MM_DD
-        const dateStr = (ev.fecha || '').replace(/_/g, '-');
-        const evDate = new Date(dateStr + 'T00:00:00Z');
-        if (!isNaN(evDate.getTime())) {
-          const ageDays = (nowTs - evDate.getTime()) / (1000 * 60 * 60 * 24);
-          if (ageDays > 30) {
-            // delete
-            delete state.nightShiftEvents[k];
-            pushAudit(state, { tipo: 'night_shift_deleted_empty', fecha_evento: ev.fecha });
-            changed = true;
+  return await updateState(state => {
+    const ev = state.nightShiftEvents?.[dateKey];
+    if (!ev) throw new Error('Evento de turno noche no encontrado: ' + dateKey);
+    if (ev.estado !== 'cerrado') throw new Error('Solo se puede reabrir un evento cerrado.');
+    if (ev.horas_aplicadas === true) {
+      const persons = ev.personal || [];
+      for (const p of persons) {
+        const computable = p.computable_horas === false ? false : true;
+        if (!p.supervisor && computable) {
+          const emp = state.employees[p.empleado_id];
+          if (emp && emp.stats && typeof emp.stats.horas_100 === 'number') {
+            emp.stats.horas_100 = Math.max(0, (emp.stats.horas_100 || 0) - (NIGHT_SHIFT_CONFIG.horas_por_evento || 0));
+            applyMetadata(emp, user);
           }
         }
       }
-    } catch (e) {
-      // ignore per-event errors
+      delete ev.snapshot;
+      ev.horas_aplicadas = false;
     }
-  }
-  if (changed) await store.save(state);
-  return changed;
+    const nowDate = new Date();
+    const currentMonthKey = nowDate.toISOString().slice(0, 7).replace('-', '_');
+    if (!ev.fecha.startsWith(currentMonthKey)) throw new Error('Solo se pueden reabrir eventos del mes actual.');
+
+    ev.estado = 'planificado';
+    applyMetadata(ev, user);
+    const audit = {
+      ts: now(),
+      tipo: 'night_shift_reopened',
+      fecha_evento: ev.fecha,
+      supervisor_id: ev.supervisor_id || null
+    };
+    applyMetadata(audit, user);
+    pushAudit(state, audit);
+    return ev;
+  });
+}
+
+async function cleanupOldEmptyNightEvents() {
+  return await updateState(state => {
+    const nowTs = Date.now();
+    let changed = false;
+    for (const [k, ev] of Object.entries(state.nightShiftEvents || {})) {
+      try {
+        if (ev && ev.estado === 'planificado' && (!ev.personal || ev.personal.length === 0)) {
+          const dateStr = (ev.fecha || '').replace(/_/g, '-');
+          const evDate = new Date(dateStr + 'T00:00:00Z');
+          if (!isNaN(evDate.getTime())) {
+            const ageDays = (nowTs - evDate.getTime()) / (1000 * 60 * 60 * 24);
+            if (ageDays > 30) {
+              delete state.nightShiftEvents[k];
+              pushAudit(state, { tipo: 'night_shift_deleted_empty', fecha_evento: ev.fecha });
+              changed = true;
+            }
+          }
+        }
+      } catch (e) {
+        // ignore per-event errors
+      }
+    }
+    if (!changed) return skipStateWrite(false);
+    return true;
+  });
 }
 
 // ─── Turno semanal con historial ────────────────────────────────────────────
@@ -947,25 +1654,32 @@ async function cleanupOldEmptyNightEvents() {
  */
 async function registerShiftWeekChange(turno) {
   if (!['mañana', 'tarde'].includes(turno)) throw new Error('turno debe ser "mañana" o "tarde".');
-  const state = await store.load();
-  if (!state.systemConfig.shiftHistory) state.systemConfig.shiftHistory = [];
+  return await updateState(state => {
+    if (!state.systemConfig.shiftHistory) state.systemConfig.shiftHistory = [];
+    const previousShift = state.systemConfig.currentShiftWeek;
 
-  const today = new Date();
-  const dow = today.getDay(); // 0=sun
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
-  const weekStart = monday.toISOString().slice(0, 10);
+    const today = new Date();
+    const dow = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+    const weekStart = monday.toISOString().slice(0, 10);
 
-  state.systemConfig.currentShiftWeek = turno;
-  // Reemplazar entrada existente para esta semana si ya existe
-  state.systemConfig.shiftHistory = state.systemConfig.shiftHistory.filter(h => h.weekStart !== weekStart);
-  state.systemConfig.shiftHistory.push({ weekStart, turno, changedAt: now() });
-  // Guardar solo el último año
-  if (state.systemConfig.shiftHistory.length > 52) {
-    state.systemConfig.shiftHistory = state.systemConfig.shiftHistory.slice(-52);
-  }
-  await store.save(state);
-  return state.systemConfig;
+    state.systemConfig.currentShiftWeek = turno;
+    state.systemConfig.shiftHistory = state.systemConfig.shiftHistory.filter(h => h.weekStart !== weekStart);
+    state.systemConfig.shiftHistory.push({ weekStart, turno, changedAt: now() });
+    if (state.systemConfig.shiftHistory.length > 52) {
+      state.systemConfig.shiftHistory = state.systemConfig.shiftHistory.slice(-52);
+    }
+    appendAuditLogEntry(state, {
+      operation: 'config.shift_week_changed',
+      entity: 'systemConfig',
+      entityId: weekStart,
+      before: { currentShiftWeek: previousShift },
+      after: { currentShiftWeek: turno, weekStart },
+      origin: 'config.shift_week',
+    });
+    return state.systemConfig;
+  });
 }
 
 // ─── Operaciones de mantenimiento ──────────────────────────────────────────────
@@ -976,24 +1690,34 @@ async function registerShiftWeekChange(turno) {
  * @returns {Promise<number>} cantidad de incidentes cerrados
  */
 async function expireStaleDescargas() {
-  const state = await store.load();
-  let count = 0;
-  for (const id of state.employeesList) {
-    const emp = state.employees[id];
-    if (!emp) continue;
-    for (const inc of emp.incidents) {
-      if (inc.status === 'pendiente_descargo' && !inc.descargo) {
-        const age = Date.now() - new Date(inc.ts).getTime();
-        if (age > APP_CONFIG.DESCARGO_WINDOW_MS) {
-          inc.status = 'cerrado_sin_descargo';
-          inc.closedAt = now();
-          count++;
+  if (!isPenaltyEnabled()) return 0;
+  return await updateState(state => {
+    let count = 0;
+    for (const id of state.employeesList) {
+      const emp = state.employees[id];
+      if (!emp) continue;
+      for (const inc of emp.incidents) {
+        if (inc.status === 'pendiente_descargo' && !inc.descargo) {
+          const age = Date.now() - new Date(inc.ts).getTime();
+          if (age > APP_CONFIG.DESCARGO_WINDOW_MS) {
+            inc.status = 'cerrado_sin_descargo';
+            inc.closedAt = now();
+            appendAuditLogEntry(state, {
+              operation: 'penalty.expired',
+              entity: 'incident',
+              entityId: inc.id,
+              before: { status: 'pendiente_descargo', empleado_id: id },
+              after: { status: inc.status, closedAt: inc.closedAt, empleado_id: id },
+              origin: 'penalties.expire',
+            });
+            count++;
+          }
         }
       }
     }
-  }
-  if (count > 0) await store.save(state);
-  return count;
+    if (count === 0) return skipStateWrite(0);
+    return count;
+  });
 }
 
 /**
@@ -1001,19 +1725,28 @@ async function expireStaleDescargas() {
  * @returns {Promise<string[]>} IDs de empleados desactivados
  */
 async function deactivateExpiredEventuals() {
-  const state = await store.load();
-  const today = new Date().toISOString().slice(0, 10);
-  const deactivated = [];
-  for (const id of state.employeesList) {
-    const emp = state.employees[id];
-    if (!emp) continue;
-    if (emp.tipo === 'eventual_comun' && emp.activo && emp.fecha_fin && emp.fecha_fin < today) {
-      emp.activo = false;
-      deactivated.push(id);
+  return await updateState(state => {
+    const today = new Date().toISOString().slice(0, 10);
+    const deactivated = [];
+    for (const id of state.employeesList) {
+      const emp = state.employees[id];
+      if (!emp) continue;
+      if (emp.tipo === 'eventual_comun' && emp.activo && emp.fecha_fin && emp.fecha_fin < today) {
+        emp.activo = false;
+        deactivated.push(id);
+        appendAuditLogEntry(state, {
+          operation: 'employee.auto_deactivated',
+          entity: 'employee',
+          entityId: id,
+          before: { activo: true, fecha_fin: emp.fecha_fin },
+          after: { activo: false, fecha_fin: emp.fecha_fin },
+          origin: 'employees.auto_deactivate',
+        });
+      }
     }
-  }
-  if (deactivated.length) await store.save(state);
-  return deactivated;
+    if (!deactivated.length) return skipStateWrite([]);
+    return deactivated;
+  });
 }
 
 /**
@@ -1023,34 +1756,33 @@ async function deactivateExpiredEventuals() {
  * @returns {Promise<number>} cantidad de empleados beneficiados
  */
 async function applyMonthlyRecovery(yearMonth, user) {
+  if (!isReputationEnabled()) return 0;
   if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
     throw new Error('yearMonth debe ser "YYYY-MM". Ejemplo: "2026-02".');
   }
-  const state = await store.load();
-
-  if (state.systemConfig.lastRecoveryMonth === yearMonth) {
-    throw new Error('La recuperación mensual ya fue aplicada.');
-  }
-
-  const prefix = yearMonth + '-';
-  let count = 0;
-  for (const id of state.employeesList) {
-    const emp = state.employees[id];
-    if (!emp || !emp.activo) continue;
-    const hadPenalty = emp.incidents.some(
-      inc => inc.ts.startsWith(prefix) && inc.delta < 0
-    );
-    if (!hadPenalty) {
-      emp.reputation = Math.min(100, emp.reputation + APP_CONFIG.REPUTATION_RECOVERY.mes_sin_incidentes);
-      count++;
+  return await updateState(state => {
+    if (state.systemConfig.lastRecoveryMonth === yearMonth) {
+      throw new Error('La recuperación mensual ya fue aplicada.');
     }
-  }
-  if (count >= 0) { // always save to update lastRecoveryMonth
+    const previousRecoveryMonth = state.systemConfig.lastRecoveryMonth || null;
+
+    const prefix = yearMonth + '-';
+    let count = 0;
+    for (const id of state.employeesList) {
+      const emp = state.employees[id];
+      if (!emp || !emp.activo) continue;
+      const hadPenalty = emp.incidents.some(
+        inc => inc.ts.startsWith(prefix) && inc.delta < 0
+      );
+      if (!hadPenalty) {
+        applyPositiveReputation(emp, APP_CONFIG.REPUTATION_RECOVERY.mes_sin_incidentes);
+        count++;
+      }
+    }
+
     state.systemConfig.lastRecoveryMonth = yearMonth;
 
-    // Registrar en auditLogs
     const log = {
-      id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
       ts: now(),
       tipo: 'monthly_recovery',
       fecha: yearMonth,
@@ -1058,18 +1790,23 @@ async function applyMonthlyRecovery(yearMonth, user) {
       cantidad_empleados_beneficiados: count
     };
     applyMetadata(state.systemConfig, user);
-    applyMetadata(log, user);
-    pushAudit(state, log);
+    appendAuditLogEntry(state, {
+      operation: 'config.monthly_recovery_applied',
+      entity: 'systemConfig',
+      entityId: yearMonth,
+      before: { lastRecoveryMonth: previousRecoveryMonth },
+      after: { lastRecoveryMonth: yearMonth, cantidad_empleados_beneficiados: count },
+      origin: 'config.monthly_recovery',
+      ...log,
+    }, user);
 
-    // apply metadata to employees changed
     for (const id of state.employeesList) {
       const emp = state.employees[id];
       if (emp && emp.reputation && emp.version !== undefined) applyMetadata(emp, user);
     }
 
-    await store.save(state);
-  }
-  return count;
+    return count;
+  });
 }
 
 /**
@@ -1123,14 +1860,23 @@ function shiftWeekKey(weekKey, delta) {
  */
 async function setWeekAvailability(empId, disponible, dias = null, weekKey = null, user) {
   const wk = weekKey || getISOWeekKey();
-  const state = await store.load();
-  if (!state.weekAvailability) state.weekAvailability = {};
-  if (!state.weekAvailability[wk]) state.weekAvailability[wk] = {};
-  const diasCopy = Array.isArray(dias) ? dias.slice() : [];
-  state.weekAvailability[wk][empId] = { disponible: !!disponible, dias: diasCopy };
-  applyMetadata(state.weekAvailability[wk][empId], user);
-  applyMetadata(state.weekAvailability[wk], user);
-  await store.save(state);
+  await updateState(state => {
+    if (!state.weekAvailability) state.weekAvailability = {};
+    if (!state.weekAvailability[wk]) state.weekAvailability[wk] = {};
+    const before = cloneAuditSnapshot(state.weekAvailability[wk][empId] || null);
+    const diasCopy = Array.isArray(dias) ? dias.slice() : [];
+    state.weekAvailability[wk][empId] = { disponible: !!disponible, dias: diasCopy };
+    applyMetadata(state.weekAvailability[wk][empId], user);
+    applyMetadata(state.weekAvailability[wk], user);
+    appendAuditLogEntry(state, {
+      operation: 'availability.updated',
+      entity: 'weekAvailability',
+      entityId: `${wk}:${empId}`,
+      before,
+      after: cloneAuditSnapshot(state.weekAvailability[wk][empId]),
+      origin: 'availability.set',
+    }, user);
+  });
 }
 
 /**
@@ -1145,34 +1891,52 @@ async function getWeekAvailability(weekKey = null) {
 /** Limpia toda la planificación de una semana. */
 async function resetWeekAvailability(weekKey = null, user) {
   const wk = weekKey || getISOWeekKey();
-  const state = await store.load();
-  if (!state.weekAvailability) state.weekAvailability = {};
-  state.weekAvailability[wk] = {};
-  applyMetadata(state.weekAvailability[wk], user);
-  await store.save(state);
+  await updateState(state => {
+    if (!state.weekAvailability) state.weekAvailability = {};
+    const before = cloneAuditSnapshot(state.weekAvailability[wk] || {});
+    state.weekAvailability[wk] = {};
+    applyMetadata(state.weekAvailability[wk], user);
+    appendAuditLogEntry(state, {
+      operation: 'availability.reset',
+      entity: 'weekAvailability',
+      entityId: wk,
+      before,
+      after: {},
+      origin: 'availability.reset',
+    }, user);
+  });
 }
 
 /** Actualiza múltiples empleados de una vez. */
 async function bulkSetWeekAvailability(map, weekKey = null, user) {
   const wk = weekKey || getISOWeekKey();
-  const state = await store.load();
-  if (!state.weekAvailability) state.weekAvailability = {};
-  const existing = state.weekAvailability[wk] || {};
-  const newEntries = {};
-  for (const empId of Object.keys(map || {})) {
-    const v = map[empId] || {};
-    newEntries[empId] = { disponible: !!v.disponible, dias: Array.isArray(v.dias) ? v.dias.slice() : [] };
-  }
-  // Merge but ensure we copy dias arrays from existing entries too (break shared refs)
-  const merged = {};
-  for (const id of Object.keys(existing)) {
-    const ex = existing[id] || {};
-    merged[id] = { disponible: !!ex.disponible, dias: Array.isArray(ex.dias) ? ex.dias.slice() : [] };
-  }
-  for (const id of Object.keys(newEntries)) merged[id] = newEntries[id];
-  state.weekAvailability[wk] = merged;
-  applyMetadata(state.weekAvailability[wk], user);
-  await store.save(state);
+  await updateState(state => {
+    if (!state.weekAvailability) state.weekAvailability = {};
+    const before = cloneAuditSnapshot(state.weekAvailability[wk] || {});
+    const existing = state.weekAvailability[wk] || {};
+    const newEntries = {};
+    for (const empId of Object.keys(map || {})) {
+      const v = map[empId] || {};
+      newEntries[empId] = { disponible: !!v.disponible, dias: Array.isArray(v.dias) ? v.dias.slice() : [] };
+    }
+    const merged = {};
+    for (const id of Object.keys(existing)) {
+      const ex = existing[id] || {};
+      merged[id] = { disponible: !!ex.disponible, dias: Array.isArray(ex.dias) ? ex.dias.slice() : [] };
+    }
+    for (const id of Object.keys(newEntries)) merged[id] = newEntries[id];
+    state.weekAvailability[wk] = merged;
+    applyMetadata(state.weekAvailability[wk], user);
+    appendAuditLogEntry(state, {
+      operation: 'availability.bulk_updated',
+      entity: 'weekAvailability',
+      entityId: wk,
+      before,
+      after: cloneAuditSnapshot(merged),
+      origin: 'availability.bulk_set',
+      details: { employeeCount: Object.keys(newEntries).length },
+    }, user);
+  });
 }
 
 /**
@@ -1180,220 +1944,312 @@ async function bulkSetWeekAvailability(map, weekKey = null, user) {
  * Llamar en el arranque para evitar que localStorage crezca indefinidamente.
  */
 async function purgeOldWeekAvailability(maxWeeks = 8) {
-  const state = await store.load();
-  if (!state.weekAvailability) return;
-  const currentKey = getISOWeekKey();
-  const cutoff = shiftWeekKey(currentKey, -maxWeeks);
-  let changed = false;
-  for (const wk of Object.keys(state.weekAvailability)) {
-    if (wk < cutoff) { delete state.weekAvailability[wk]; changed = true; }
-  }
-  // Sanitize remaining entries to ensure dias arrays are independent copies
-  for (const wk of Object.keys(state.weekAvailability)) {
-    const map = state.weekAvailability[wk] || {};
-    for (const id of Object.keys(map)) {
-      const v = map[id] || {};
-      map[id] = { disponible: !!v.disponible, dias: Array.isArray(v.dias) ? v.dias.slice() : [] };
+  await updateState(state => {
+    if (!state.weekAvailability) return skipStateWrite();
+    const currentKey = getISOWeekKey();
+    const cutoff = shiftWeekKey(currentKey, -maxWeeks);
+    let changed = false;
+    const purgedWeeks = [];
+    for (const wk of Object.keys(state.weekAvailability)) {
+      if (wk < cutoff) {
+        delete state.weekAvailability[wk];
+        purgedWeeks.push(wk);
+        changed = true;
+      }
     }
-  }
-  if (changed) await store.save(state);
+    for (const wk of Object.keys(state.weekAvailability)) {
+      const map = state.weekAvailability[wk] || {};
+      for (const id of Object.keys(map)) {
+        const v = map[id] || {};
+        map[id] = { disponible: !!v.disponible, dias: Array.isArray(v.dias) ? v.dias.slice() : [] };
+      }
+    }
+    if (!changed) return skipStateWrite();
+    appendAuditLogEntry(state, {
+      operation: 'availability.purged',
+      entity: 'weekAvailability',
+      entityId: cutoff,
+      before: { weeks: purgedWeeks },
+      after: { weeks: [] },
+      origin: 'availability.purge',
+      details: { cutoff, maxWeeks },
+    });
+  });
 }
 
 // ─── SÁBADO V1.2 (Nuevo Módulo Independiente) ────────────────────────────────
 
 async function registrarAnotacionSabado(empleado_id, sector, rol, deseaExtender, fechaSabado, user) {
-  const state = await store.load();
-  ensureSaturdayData(state);
-  const empId = String(empleado_id);
-  if (!state.employees[empId]) throw new Error('Empleado no encontrado');
+  return await updateState(state => {
+    ensureSaturdayData(state);
+    const empId = String(empleado_id);
+    if (!state.employees[empId]) throw new Error('Empleado no encontrado');
 
-  const stats = state.saturdayData.employees[empId];
-  stats.sabados_anotados += 1;
+    const stats = state.saturdayData.employees[empId];
+    stats.sabados_anotados += 1;
 
-  const evId = 'satv12_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-  const ev = {
-    id: evId,
-    empleado_id: empId,
-    estado: 'anotado',
-    sector: sector || '',
-    rol: rol || '',
-    deseaExtender: !!deseaExtender,
-    fechaSabado: fechaSabado || new Date().toISOString().slice(0, 10), // YYYY-MM-DD
-    ts: now(),
-  };
-  state.saturdayData.events.push(ev);
+    const ev = {
+      id: generateId('satv12'),
+      empleado_id: empId,
+      estado: 'anotado',
+      sector: sector || '',
+      rol: rol || '',
+      deseaExtender: !!deseaExtender,
+      fechaSabado: fechaSabado || new Date().toISOString().slice(0, 10),
+      ts: now(),
+    };
+    state.saturdayData.events.push(ev);
 
-  applyMetadata(ev, user);
-  applyMetadata(stats, user);
-  await store.save(state);
-  return ev;
+    applyMetadata(ev, user);
+    applyMetadata(stats, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.annotation_created',
+      entity: 'saturdayAnnotation',
+      entityId: ev.id,
+      before: null,
+      after: {
+        empleado_id: empId,
+        fechaSabado: ev.fechaSabado,
+        sector: ev.sector,
+        rol: ev.rol,
+        deseaExtender: ev.deseaExtender,
+      },
+      origin: 'saturday.annotation.create',
+    }, user);
+    return ev;
+  });
 }
 
 async function asignarSabado(eventId, horarioInicio, horarioFin, desc_12hs = false, motivo = null, supervisorId = null, user) {
-  const state = await store.load();
-  ensureSaturdayData(state);
-  const ev = state.saturdayData.events.find(e => e.id === eventId);
-  if (!ev) throw new Error('Evento no encontrado');
-  if (ev.estado !== 'anotado') throw new Error('El evento debe estar en estado "anotado" para asignar');
+  return await updateState(state => {
+    ensureSaturdayData(state);
+    const ev = state.saturdayData.events.find(e => normalizeId(e.id) === normalizeId(eventId));
+    if (!ev) throw new Error('Evento no encontrado');
+    if (ev.estado !== 'anotado') throw new Error('El evento debe estar en estado "anotado" para asignar');
 
-  // Calcular ranking local (no recargar estado extra) y comprobar top3
-  const activos = state.employeesList.filter(id => state.employees[id] && state.employees[id].activo);
-  const ranked = activos
-    .map(id => ({ id, score: (state.saturdayData.employees[id]?.score_sabado ?? 0) }))
-    .sort((a, b) => a.score - b.score)
-    .map(x => x.id);
-  const top3 = ranked.slice(0, 3);
+    const top3 = isSaturdayRankingEnabled()
+      ? state.employeesList
+        .filter(id => state.employees[id] && state.employees[id].activo)
+        .map(id => ({ id, score: (state.saturdayData.employees[id]?.score_sabado ?? 0) }))
+        .sort((a, b) => a.score - b.score)
+        .map(x => x.id)
+        .slice(0, 3)
+      : [];
 
-  // Si el empleado no está en el top3, registrar auditoría (motivo recomendado pero no bloqueante)
-  if (!top3.includes(ev.empleado_id)) {
-    pushAudit(state, {
-      tipo: 'asignacion_sabado_fuera_ranking',
-      empleado_id: ev.empleado_id,
-      motivo: motivo || '',
-      supervisor: supervisorId || 'sistema'
-    });
-  }
+    if (isSaturdayRankingEnabled() && !top3.includes(ev.empleado_id)) {
+      appendAuditLogEntry(state, {
+        operation: 'saturday.assigned_outside_ranking',
+        entity: 'saturdayAssignment',
+        entityId: ev.id,
+        before: { estado: ev.estado, empleado_id: ev.empleado_id },
+        after: { estado: 'asignado', empleado_id: ev.empleado_id },
+        origin: 'saturday.assign.outside_ranking',
+        details: { motivo: motivo || '', supervisor: supervisorId || 'sistema' },
+        empleado_id: ev.empleado_id,
+        motivo: motivo || '',
+        supervisor: supervisorId || 'sistema',
+      }, user);
+    }
 
-  ev.estado = 'asignado';
-  ev.horarioInicio = horarioInicio;
-  ev.horarioFin = horarioFin;
-  ev.descanso_12hs_cumplido = !!desc_12hs;
-  ev.asignadoEn = now();
+    ev.estado = 'asignado';
+    ev.horarioInicio = horarioInicio;
+    ev.horarioFin = horarioFin;
+    ev.descanso_12hs_cumplido = !!desc_12hs;
+    ev.asignadoEn = now();
 
-  applyMetadata(ev, user);
-  applyMetadata(state.saturdayData.employees[ev.empleado_id], user);
-
-  await store.save(state);
-  return ev;
+    applyMetadata(ev, user);
+    applyMetadata(state.saturdayData.employees[ev.empleado_id], user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.assigned',
+      entity: 'saturdayAssignment',
+      entityId: ev.id,
+      before: { estado: 'anotado', empleado_id: ev.empleado_id },
+      after: {
+        estado: ev.estado,
+        empleado_id: ev.empleado_id,
+        horarioInicio,
+        horarioFin,
+        descanso_12hs_cumplido: ev.descanso_12hs_cumplido,
+      },
+      origin: 'saturday.assign',
+    }, user);
+    return ev;
+  });
 }
 
 async function asignarSabadoFueraDeRanking(eventId, horarioInicio, horarioFin, desc_12hs, motivo, supervisorId, user) {
-  // motivo recomendado pero no bloqueante — se audita igual
-  const ev = await asignarSabado(eventId, horarioInicio, horarioFin, desc_12hs, motivo, supervisorId, user);
+  return await updateState(state => {
+    ensureSaturdayData(state);
+    const ev = state.saturdayData.events.find(e => normalizeId(e.id) === normalizeId(eventId));
+    if (!ev) throw new Error('Evento no encontrado');
+    if (ev.estado !== 'anotado') throw new Error('El evento debe estar en estado "anotado" para asignar');
 
-  const state = await store.load();
-  const log = {
-    id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    ts: now(),
-    tipo: 'asignacion_sabado_fuera_ranking',
-    empleado_id: ev.empleado_id,
-    motivo: motivo,
-    supervisor: supervisorId || 'sistema'
-  };
-  applyMetadata(log, user);
-  pushAudit(state, log);
-  await store.save(state);
-  return ev;
+    ev.estado = 'asignado';
+    ev.horarioInicio = horarioInicio;
+    ev.horarioFin = horarioFin;
+    ev.descanso_12hs_cumplido = !!desc_12hs;
+    ev.asignadoEn = now();
+
+    if (isSaturdayRankingEnabled()) {
+      appendAuditLogEntry(state, {
+        operation: 'saturday.assigned_outside_ranking',
+        entity: 'saturdayAssignment',
+        entityId: ev.id,
+        before: { estado: 'anotado', empleado_id: ev.empleado_id },
+        after: { estado: ev.estado, empleado_id: ev.empleado_id },
+        origin: 'saturday.assign.outside_ranking',
+        details: { motivo: motivo || '', supervisor: supervisorId || 'sistema' },
+        empleado_id: ev.empleado_id,
+        motivo: motivo || '',
+        supervisor: supervisorId || 'sistema',
+      }, user);
+    }
+    applyMetadata(ev, user);
+    applyMetadata(state.saturdayData.employees[ev.empleado_id], user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.assigned',
+      entity: 'saturdayAssignment',
+      entityId: ev.id,
+      before: { estado: 'anotado', empleado_id: ev.empleado_id },
+      after: {
+        estado: ev.estado,
+        empleado_id: ev.empleado_id,
+        horarioInicio,
+        horarioFin,
+        descanso_12hs_cumplido: ev.descanso_12hs_cumplido,
+      },
+      origin: 'saturday.assign.manual_override',
+    }, user);
+    return ev;
+  });
 }
 
 async function registrarTrabajoSabado(eventId, horaInicioReal, horaFinReal, user) {
-  const state = await store.load();
-  ensureSaturdayData(state);
-  const ev = state.saturdayData.events.find(e => e.id === eventId);
-  if (!ev) throw new Error('Evento no encontrado');
-  if (ev.estado !== 'asignado') throw new Error('Debe estar asignado para registrar trabajo real');
+  return await updateState(state => {
+    ensureSaturdayData(state);
+    const ev = state.saturdayData.events.find(e => normalizeId(e.id) === normalizeId(eventId));
+    if (!ev) throw new Error('Evento no encontrado');
+    if (ev.estado !== 'asignado') throw new Error('Debe estar asignado para registrar trabajo real');
 
-  // Cálculos de hora simple (asumiendo HH:mm formato 24h)
-  const [hI, mI] = horaInicioReal.split(':').map(Number);
-  const [hF, mF] = horaFinReal.split(':').map(Number);
-  const minTotales = (hF * 60 + mF) - (hI * 60 + mI);
-  const horasReales = minTotales > 0 ? minTotales / 60 : 0;
+    const [hI, mI] = horaInicioReal.split(':').map(Number);
+    const [hF, mF] = horaFinReal.split(':').map(Number);
+    const minTotales = (hF * 60 + mF) - (hI * 60 + mI);
+    const horasReales = minTotales > 0 ? minTotales / 60 : 0;
 
-  ev.estado = 'trabajado';
-  ev.horaInicioReal = horaInicioReal;
-  ev.horaFinReal = horaFinReal;
-  ev.horasReales = horasReales;
-  ev.trabajadoEn = now();
+    ev.estado = 'trabajado';
+    ev.horaInicioReal = horaInicioReal;
+    ev.horaFinReal = horaFinReal;
+    ev.horasReales = horasReales;
+    ev.trabajadoEn = now();
 
-  const stats = state.saturdayData.employees[ev.empleado_id];
-  stats.sabados_trabajados += 1;
-  stats.horas_sabado_totales += horasReales;
-  stats.reputation_sabado = Math.min(100, stats.reputation_sabado + 1);
-  stats.score_sabado = calcularScoreSabado(stats);
+    const stats = state.saturdayData.employees[ev.empleado_id];
+    stats.sabados_trabajados += 1;
+    stats.horas_sabado_totales += horasReales;
+    stats.reputation_sabado = Math.min(100, stats.reputation_sabado + 1);
+    stats.score_sabado = calcularScoreSabado(stats);
 
-  applyMetadata(ev, user);
-  applyMetadata(stats, user);
-  await store.save(state);
-  return ev;
+    applyMetadata(ev, user);
+    applyMetadata(stats, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.work_recorded',
+      entity: 'saturdayAssignment',
+      entityId: ev.id,
+      before: { estado: 'asignado', empleado_id: ev.empleado_id },
+      after: {
+        estado: ev.estado,
+        empleado_id: ev.empleado_id,
+        horaInicioReal,
+        horaFinReal,
+        horasReales,
+      },
+      origin: 'saturday.work.record',
+    }, user);
+    return ev;
+  });
 }
 
 async function registrarFaltaSabado(eventId, user) {
-  const state = await store.load();
-  ensureSaturdayData(state);
-  const ev = state.saturdayData.events.find(e => e.id === eventId);
-  if (!ev) throw new Error('Evento no encontrado');
-  if (ev.estado !== 'asignado') throw new Error('Debe estar asignado para registrar falta');
+  return await updateState(state => {
+    ensureSaturdayData(state);
+    const ev = state.saturdayData.events.find(e => normalizeId(e.id) === normalizeId(eventId));
+    if (!ev) throw new Error('Evento no encontrado');
+    if (ev.estado !== 'asignado') throw new Error('Debe estar asignado para registrar falta');
 
-  ev.estado = 'falto';
-  ev.faltoEn = now();
+    ev.estado = 'falto';
+    ev.faltoEn = now();
 
-  const stats = state.saturdayData.employees[ev.empleado_id];
-  stats.sabados_faltados += 1;
-  stats.reputation_sabado = Math.max(0, stats.reputation_sabado - 15);
-  stats.score_sabado = calcularScoreSabado(stats);
+    const stats = state.saturdayData.employees[ev.empleado_id];
+    stats.sabados_faltados += 1;
+    stats.reputation_sabado = Math.max(0, stats.reputation_sabado - 15);
+    stats.score_sabado = calcularScoreSabado(stats);
 
-  pushAudit(state, {
-    tipo: 'falta_sabado',
-    empleado_id: ev.empleado_id,
+    applyMetadata(ev, user);
+    applyMetadata(stats, user);
+    appendAuditLogEntry(state, {
+      operation: 'saturday.absence_recorded',
+      entity: 'saturdayAssignment',
+      entityId: ev.id,
+      before: { estado: 'asignado', empleado_id: ev.empleado_id, reputation_sabado: stats.reputation_sabado + 15 },
+      after: { estado: ev.estado, empleado_id: ev.empleado_id, reputation_sabado: stats.reputation_sabado },
+      origin: 'saturday.absence',
+      empleado_id: ev.empleado_id,
+    }, user);
+    return ev;
   });
-
-  applyMetadata(ev, user);
-  applyMetadata(stats, user);
-  await store.save(state);
-  return ev;
 }
 
 async function applyMonthlyRecoverySabado(yearMonth, user) {
+  if (!isSaturdayRankingEnabled()) return 0;
   if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) throw new Error('yearMonth inválido');
-  const state = await store.load();
-  ensureSaturdayData(state);
+  return await updateState(state => {
+    ensureSaturdayData(state);
 
-  if (state.saturdayData.config.lastRecoveryMonth === yearMonth) {
-    throw new Error('La recuperación mensual sábado ya fue aplicada este mes.');
-  }
-
-  const prefix = yearMonth + '-';
-  let count = 0;
-
-  // Buscar empleados que faltaron este mes
-  const faltantesDelMes = new Set();
-  for (const ev of state.saturdayData.events) {
-    if (ev.estado === 'falto' && ev.faltoEn && ev.faltoEn.startsWith(prefix)) {
-      faltantesDelMes.add(ev.empleado_id);
+    if (state.saturdayData.config.lastRecoveryMonth === yearMonth) {
+      throw new Error('La recuperación mensual sábado ya fue aplicada este mes.');
     }
-  }
+    const previousRecoveryMonth = state.saturdayData.config.lastRecoveryMonth || null;
 
-  for (const [empId, stats] of Object.entries(state.saturdayData.employees)) {
-    const isActivo = state.employees[empId] && state.employees[empId].activo;
-    if (isActivo && !faltantesDelMes.has(empId)) {
-      stats.reputation_sabado = Math.min(100, stats.reputation_sabado + 2);
-      stats.score_sabado = calcularScoreSabado(stats);
-      count++;
+    const prefix = yearMonth + '-';
+    let count = 0;
+    const faltantesDelMes = new Set();
+    for (const ev of state.saturdayData.events) {
+      if (ev.estado === 'falto' && ev.faltoEn && ev.faltoEn.startsWith(prefix)) {
+        faltantesDelMes.add(ev.empleado_id);
+      }
     }
-  }
 
-  state.saturdayData.config.lastRecoveryMonth = yearMonth;
-  const log = {
-    id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    ts: now(),
-    tipo: 'monthly_recovery_sabado',
-    fecha: yearMonth,
-    cantidad_beneficiados: count
-  };
-  applyMetadata(log, user);
-  pushAudit(state, log);
-  applyMetadata(state.saturdayData.config, user);
+    for (const [empId, stats] of Object.entries(state.saturdayData.employees)) {
+      const isActivo = state.employees[empId] && state.employees[empId].activo;
+      if (isActivo && !faltantesDelMes.has(empId)) {
+        stats.reputation_sabado = Math.min(100, stats.reputation_sabado + 2);
+        stats.score_sabado = calcularScoreSabado(stats);
+        count++;
+      }
+    }
 
-  // apply metadata to saturday stats updated
-  for (const [empId, stats] of Object.entries(state.saturdayData.employees)) {
-    applyMetadata(stats, user);
-  }
+    state.saturdayData.config.lastRecoveryMonth = yearMonth;
+    appendAuditLogEntry(state, {
+      operation: 'saturday.monthly_recovery_applied',
+      entity: 'saturdayConfig',
+      entityId: yearMonth,
+      before: { lastRecoveryMonth: previousRecoveryMonth },
+      after: { lastRecoveryMonth: yearMonth, cantidad_beneficiados: count },
+      origin: 'saturday.monthly_recovery',
+      fecha: yearMonth,
+      cantidad_beneficiados: count,
+    }, user);
+    applyMetadata(state.saturdayData.config, user);
 
-  await store.save(state);
-  return count;
+    for (const [empId, stats] of Object.entries(state.saturdayData.employees)) {
+      applyMetadata(stats, user);
+    }
+
+    return count;
+  });
 }
 
 async function obtenerRankingSabado() {
+  if (!isSaturdayRankingEnabled()) return [];
   const state = await store.load();
   ensureSaturdayData(state);
   const activosemp = (state.employeesList || []).filter(id => state.employees[id] && state.employees[id].activo);
@@ -1433,7 +2289,7 @@ async function runSystemAudit() {
     total_checks++;
     const emp = (snap.employees || {})[id];
     if (!emp) { pushError(`employeesList[${id}]`, 'Empleado listado pero no existe en employees'); continue; }
-    if (emp.id === undefined || String(emp.id) !== String(id)) pushError(`employees.${id}.id`, `ID ausente o inconsistente (esperado: ${id})`);
+    if (emp.id === undefined || normalizeId(emp.id) !== normalizeId(id)) pushError(`employees.${id}.id`, `ID ausente o inconsistente (esperado: ${id})`);
     if (!emp.stats || typeof emp.stats !== 'object') pushError(`employees.${id}.stats`, 'Campo stats faltante o inválido');
     else {
       if ((emp.stats.horas_50 || 0) < 0) pushError(`employees.${id}.stats.horas_50`, 'horas_50 < 0');
@@ -1536,6 +2392,7 @@ async function runSystemAudit() {
   // 7) Validación de storage global
   total_checks++;
   if (snap.nightShiftSchemaVersion === undefined && snap.schemaVersion === undefined) pushWarn('storage.schema', 'nightShiftSchemaVersion o schemaVersion ausente');
+  if ('nextIdCounter' in snap) pushWarn('storage.nextIdCounter', 'nextIdCounter es un campo legado y se IGNORA (compatibilidad legado)');
   // Comprobar estructura base contra INITIAL_STATE
   const missingKeys = Object.keys(INITIAL_STATE).filter(k => !(k in snap));
   if (missingKeys.length) pushError('storage.INITIAL_STATE', 'Faltan claves esperadas: ' + missingKeys.join(', '));
@@ -1551,8 +2408,34 @@ async function runSystemAudit() {
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
 
-export async function resetAllData() {
-  await store.reset();
+export async function resetAllData(user) {
+  await updateState(state => {
+    const preservedAuditLogs = Array.isArray(state.auditLogs) ? state.auditLogs.slice() : [];
+    const before = {
+      employees: Object.keys(state.employees || {}).length,
+      callEvents: Object.keys(state.callEvents || {}).length,
+      saturdayEvents: Object.keys(state.saturdayEvents || {}).length,
+      nightShiftEvents: Object.keys(state.nightShiftEvents || {}).length,
+      auditLogs: preservedAuditLogs.length,
+    };
+    Object.assign(state, structuredClone(INITIAL_STATE));
+    state.auditLogs = preservedAuditLogs;
+    appendAuditLogEntry(state, {
+      operation: 'state.reset',
+      entity: 'system',
+      entityId: 'root',
+      before,
+      after: {
+        employees: 0,
+        callEvents: 0,
+        saturdayEvents: 0,
+        nightShiftEvents: 0,
+        auditLogs: preservedAuditLogs.length + 1,
+      },
+      origin: 'reset.full',
+      details: { irreversible: true },
+    }, user);
+  });
 }
 
 export {
@@ -1580,6 +2463,7 @@ export {
   applyMonthlyRecoverySabado, obtenerRankingSabado, removeEmployeeIntent
   , runSystemAudit
   ,
+  CRITICAL_AUDIT_EVENT_MAP,
   // MÓDULO TURNO NOCHE FASE 3C
   createNightShiftEvent, addNightShiftPerson, removeNightShiftPerson, closeNightShiftEvent, getNightShiftMonthlyStats,
   reopenNightShiftEvent, getNightShiftAdvancedStats, cleanupOldEmptyNightEvents

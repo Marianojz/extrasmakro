@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 2,
+  "employees": {
+    "emp-abc": { "name": "Partial User" }
+  },
+  "systemConfig": { "currentShiftWeek": 2 }
+}

@@ -1,20 +1,25 @@
 /**
  * Punto de entrada del módulo de almacenamiento.
  * ─────────────────────────────────────────────────────────────────────────────
- * Exporta el adapter activo según APP_CONFIG.FIREBASE_ENABLED.
+ * Exporta el adapter activo según APP_CONFIG.STORAGE_BACKEND.
  *
- * En modo offline (FIREBASE_ENABLED: false) → LocalStorageAdapter (síncrono)
- * En modo Firebase (FIREBASE_ENABLED: true)  → FirebaseAdapter    (asíncrono)
+ * Modo 'local'     → LocalStorageAdapter (síncrono)
+ * Modo 'firebase'  → FirebaseAdapter    (asíncrono)
+ * Modo 'supabase'  → SupabaseAdapter    (asíncrono)
  *
- * IMPORTANTE: cuando se active Firebase, models.js y app.js deben usar await
- * en todas las llamadas a store.load(), store.save() y store.reset().
+ * IMPORTANTE: save(state) sigue disponible por compatibilidad, pero update(mutator)
+ * es la ruta preferida para escrituras granulares por dominio.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { APP_CONFIG } from '../config.js';
 import localStorageAdapter from './localStorageAdapter.js';
 import firebaseAdapter     from './firebaseAdapter.js';
+import supabaseAdapter      from './supabaseAdapter.js';
 
-const store = APP_CONFIG.FIREBASE_ENABLED ? firebaseAdapter : localStorageAdapter;
+const backend = APP_CONFIG.STORAGE_BACKEND || 'local';
+const store = backend === 'firebase' ? firebaseAdapter 
+            : backend === 'supabase' ? supabaseAdapter 
+            : localStorageAdapter;
 
 export default store;

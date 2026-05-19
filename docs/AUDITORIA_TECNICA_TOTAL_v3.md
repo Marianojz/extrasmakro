@@ -113,9 +113,9 @@ FASE 4 — RIESGOS LATENTES (hallazgos técnicos)
 ---------------------------------------------
 Listo de riesgos técnicos y código asociado:
 
-1) Variables/estado global mutable
-- `nextIdCounter` en `INITIAL_STATE` se incrementa via `generateId()` → operación correcta, pero dependencia en `store.save` en cada ID puede causar I/O frecuente. Referencia: [src/storage/adapter.js](src/storage/adapter.js#L1-L20), [src/models.js](src/models.js#L20-L40).
-- Recomendación: aceptar (diseño actual) o migrar a estrategia menos agresiva tras Fase 4.
+1) Persistencia concurrente del estado
+- `nextIdCounter` ya no forma parte del estado activo; el riesgo relevante pasó a ser el patrón `load -> mutar -> save` cuando múltiples pestañas o usuarios escriben sobre el snapshot completo. Referencia: [src/storage/index.js](src/storage/index.js#L1-L25), [src/storage/localStorageAdapter.js](src/storage/localStorageAdapter.js#L1-L80), [src/storage/firebaseAdapter.js](src/storage/firebaseAdapter.js#L1-L120), [src/storage/supabaseAdapter.js](src/storage/supabaseAdapter.js#L1-L220).
+- Recomendación actual: mantener las escrituras encapsuladas en `store.update(...)`, con serialización local, transacciones en Firebase y control optimista de versión en Supabase.
 
 2) Dependencias ocultas / llamadas síncronas vs async
 - `store` en `models.js` asume adapter activo. Cuando `FIREBASE_ENABLED` se active, muchos métodos deberán volverse async/await a lo largo de `models.js` y `app.js`.
@@ -172,5 +172,3 @@ Apéndice — Lista rápida de referencias útiles (código):
 Próximos pasos sugeridos (si quieres que lo ejecute):
 - Actualizar `docs/active/MASTER_CONTEXT.md` con las correcciones mínimas (puedo aplicar parches). (Requiere permiso explícito.)
 - Agregar un conjunto mínimo de tests de humo (export/import, applyMonthlyRecovery, resolveDescargo). Puedo generar los tests y el script de ejecución.
-
-

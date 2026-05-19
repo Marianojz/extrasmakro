@@ -6,7 +6,8 @@
     "start": "node server.js",
     "start:py": "python -m http.server 3000 --directory .",
     "build": "echo \"Sin bundler — archivos servidos directamente desde src/\"",
-    "test:smoke": "node tests/smoke.test.js"
+    "test:smoke": "node tests/smoke.test.js",
+    "test:integration": "node tests/integration-audit_contract.test.js && node tests/integration-merge_behavior.test.js && node tests/integration-merge_race.test.js"
   },
   "dependencies": {},
   "devDependencies": {}

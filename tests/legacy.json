@@ -1,0 +1,9 @@
+{
+  "employees": {
+    "1001": { "id": 1001, "name": "Legacy User", "activo": true, "createdAt": "2020-01-01T00:00:00Z" }
+  },
+  "employeesList": ["1001"],
+  "callEvents": {},
+  "systemConfig": { "currentShiftWeek": 1 },
+  "auditLogs": []
+}

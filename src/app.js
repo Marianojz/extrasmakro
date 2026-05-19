@@ -13,8 +13,17 @@
 
 import api from './api/apiLayer.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
+import { isFeatureEnabled } from './config/features.js';
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
+import { normalizeId } from './utils_id.js';
+
+// Initialize backend through the API boundary
+if (APP_CONFIG.STORAGE_BACKEND === 'supabase') {
+  void Models.system.initializeStorageBackend().catch(err => {
+    console.error(err.message);
+  });
+}
 
 // ─── DOM helpers ─────────────────────────────────────────────────────────────
 
@@ -41,6 +50,32 @@ function $id(id) { return document.getElementById(id); }
 
 // Safe text helper: avoids rendering `null`/`undefined` when concatenating names
 function safeText(value) { return value == null ? '' : String(value).replace(/\bnull\b/gi, '').trim(); }
+
+function featureOn(feature) {
+  return isFeatureEnabled(feature);
+}
+
+function getSafeReputation(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(100, parsed));
+}
+
+function renderReputationBadge(value, title = '') {
+  const reputation = getSafeReputation(value);
+  const repClass = reputation >= 80 ? 'rep-high' : reputation >= 50 ? 'rep-mid' : 'rep-low';
+  const props = { class: `rep-score ${repClass}`, 'data-rep': String(reputation) };
+  if (title) props.title = title;
+  return el('span', props,
+    el('span', { class: 'rep-bar', style: 'width:' + String(reputation) + '%' }, ''),
+    el('span', { class: 'rep-num' }, String(reputation))
+  );
+}
+
+function explainNode(text) {
+  if (!featureOn('explainMode')) return null;
+  return el('p', { class: 'micro-explain' }, text);
+}
 
 // Helper: obtener empleado (acepta id o objeto). Nunca tratar un ID como objeto.
 async function fetchEmpleado(empOrId) {
@@ -78,15 +113,22 @@ function createInfoIcon(text) {
 }
 
 function setExplainMode(val) {
-  document.body.classList.toggle('explain-mode', !!val);
-  try { localStorage.setItem('explainMode', val ? 'on' : 'off'); } catch (e) { console.error("UI Error:", e); }
+  const enabled = featureOn('explainMode') && !!val;
+  document.body.classList.toggle('explain-mode', enabled);
+  if (featureOn('explainMode')) {
+    try { localStorage.setItem('explainMode', enabled ? 'on' : 'off'); } catch (e) { console.error("UI Error:", e); }
+  }
   const btn = document.getElementById('explain-toggle-btn');
-  if (btn) btn.textContent = val ? 'Modo explicación: ON' : 'Modo explicación: OFF';
-  if (val) toast('MICROEXPLICACIONES CONTEXTUALES ACTIVADAS', 'success', 2200);
+  if (btn) btn.textContent = enabled ? 'Modo explicación: ON' : 'Modo explicación: OFF';
+  if (enabled) toast('MICROEXPLICACIONES CONTEXTUALES ACTIVADAS', 'success', 2200);
 }
 
 
 function initExplainMode() {
+  if (!featureOn('explainMode')) {
+    setExplainMode(false);
+    return;
+  }
   const pref = localStorage.getItem('explainMode');
   const on = pref === 'on';
   setExplainMode(on);
@@ -286,29 +328,33 @@ function buildMobileBottomNav() {
 
 async function buildMobileHomeQuickActions() {
   const wrap = el('div', {});
-  // Mini ranking top 5
-  const list = await Models.suggestionList();
-  const top5 = list.slice(0, 5);
-  const miniRanking = el('div', { class: 'mobile-ranking-mini' },
-    el('h4', {}, '🏆 Top empleados')
-  );
   const rankIcons = ['🥇', '🥈', '🥉'];
-  if (!top5.length) {
-    miniRanking.appendChild(el('p', { class: 'muted' }, 'Sin empleados activos.'));
-  } else {
-    top5.forEach((e, idx) => {
-      miniRanking.appendChild(el('div', { class: 'mini-rank-row' },
-        el('span', { class: 'mini-rank-pos' }, rankIcons[idx] || String(idx + 1)),
-        el('span', { class: 'mini-rank-name' }, safeText(e.name)),
-        el('span', { class: 'mini-rank-score' }, e.__meta.score.toFixed(1), createInfoIcon('Score: combina horas, reputación y confiabilidad.'))
-      ));
-    });
+  let miniRanking = null;
+  if (featureOn('rankings')) {
+    const list = await Models.suggestionList();
+    const top5 = list.slice(0, 5);
+    miniRanking = el('div', { class: 'mobile-ranking-mini' },
+      el('h4', {}, '🏆 Top empleados')
+    );
+    if (!top5.length) {
+      miniRanking.appendChild(el('p', { class: 'muted' }, 'Sin empleados activos.'));
+    } else {
+      top5.forEach((e, idx) => {
+        miniRanking.appendChild(el('div', { class: 'mini-rank-row' },
+          el('span', { class: 'mini-rank-pos' }, rankIcons[idx] || String(idx + 1)),
+          el('span', { class: 'mini-rank-name' }, safeText(e.name)),
+          el('span', { class: 'mini-rank-score' }, e.__meta.score.toFixed(1), createInfoIcon('Score: combina horas, reputación y confiabilidad.'))
+        ));
+      });
+    }
   }
   // Acciones rápidas
   const actions = el('div', { class: 'mobile-quick-actions' },
     el('p', { class: 'mobile-quick-section-title' }, 'Acciones rápidas'),
-    el('button', { class: 'btn btn-primary', onclick: () => { switchTab('estadisticas'); setTimeout(renderStats, 50); } },
-      '🎯  Generar sugerencia'),
+    featureOn('rankings')
+      ? el('button', { class: 'btn btn-primary', onclick: () => { switchTab('estadisticas'); setTimeout(renderStats, 50); } },
+        '🎯  Generar sugerencia')
+      : null,
     el('button', { class: 'btn btn-info', onclick: () => switchTab('convocatorias') },
       '📞  Registrar intento'),
     el('button', { class: 'btn btn-danger', onclick: () => switchTab('convocatorias') },
@@ -343,8 +389,10 @@ async function mountUI() {
       ),
       el('div', { id: 'shift-indicator', class: 'shift-badge' }),
       el('button', { id: 'view-toggle-btn', class: 'view-toggle-btn', onclick: () => toggleMobileMode() }, '📱 Vista Móvil'),
-      el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF'),
-      el('span', { id: 'app-version', class: 'muted small' }, 'v' + (APP_CONFIG.APP_VERSION || '—'), createInfoIcon('Versión de la aplicación'))
+        featureOn('explainMode')
+          ? el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF')
+          : null,
+        el('span', { id: 'app-version', class: 'muted small' }, 'v' + (APP_CONFIG.APP_VERSION || '—'), createInfoIcon('Versión de la aplicación'))
     ),
     el('div', { class: 'app-header-bottom-line' })
   );
@@ -454,7 +502,7 @@ function buildTabEmpleados() {
   const list = el('div', { id: 'employees-list' });
   sec.append(
     el('h2', { class: 'section-title' }, 'Empleados'),
-    el('p', { class: 'micro-explain' }, 'Lista de empleados y métricas clave. Activá el Modo explicación para ver notas contextuales en cada sección.'),
+    explainNode('Lista de empleados y métricas clave. Activá el Modo explicación para ver notas contextuales en cada sección.'),
     toolbar,
     list
   );
@@ -493,7 +541,6 @@ async function renderEmployees() {
   const avMap = await Models.getWeekAvailability();
   if (useCards) {
     for (const e of items) {
-      const repClass = e.reputation >= 80 ? 'rep-high' : e.reputation >= 50 ? 'rep-mid' : 'rep-low';
       const estadoBadge = e.activo
         ? el('span', { class: 'badge badge-success' }, 'Activo')
         : el('span', { class: 'badge badge-muted' }, 'Inactivo');
@@ -518,12 +565,9 @@ async function renderEmployees() {
           el('div', { class: 'emp-grid' },
             el('div', {}, el('strong', {}, 'Turno'), el('div', {}, e.turno_base)),
             el('div', {}, el('strong', {}, 'Tipo'), el('div', {}, e.tipo)),
-            el('div', {}, el('strong', {}, 'Reputación'), el('div', {},
-              el('div', { class: `rep-score ${repClass}`, 'data-rep': String(e.reputation) },
-                el('span', { class: 'rep-bar', style: 'width:' + String(e.reputation) + '%' }, ''),
-                el('span', { class: 'rep-num' }, String(e.reputation))
-              )
-            )),
+            featureOn('reputationSystem')
+              ? el('div', {}, el('strong', {}, 'Reputación'), el('div', {}, renderReputationBadge(e.reputation)))
+              : null,
             el('div', {}, el('strong', {}, 'Estado'), el('div', {}, estadoBadge))
           )
         ),
@@ -562,7 +606,9 @@ async function renderEmployees() {
       el('th', {}, 'Nombre'),
       el('th', {}, 'Turno'),
       el('th', {}, 'Tipo'),
-      el('th', {}, el('span', {}, 'Reputación', createInfoIcon('Reputación: medida 0-100. Penaliza faltas; se recupera con buen comportamiento.'))),
+      featureOn('reputationSystem')
+        ? el('th', {}, el('span', {}, 'Reputación', createInfoIcon('Reputación: medida 0-100. Penaliza faltas; se recupera con buen comportamiento.')))
+        : null,
       el('th', {}, 'Estado'),
       el('th', {}, 'Esta semana'),
       el('th', {}, 'Acciones')
@@ -570,7 +616,6 @@ async function renderEmployees() {
   );
   const tbody = el('tbody');
   for (const e of items) {
-    const repClass = e.reputation >= 80 ? 'rep-high' : e.reputation >= 50 ? 'rep-mid' : 'rep-low';
     const estadoBadge = e.activo
       ? el('span', { class: 'badge badge-success' }, 'Activo')
       : el('span', { class: 'badge badge-muted' }, 'Inactivo');
@@ -586,10 +631,7 @@ async function renderEmployees() {
       el('td', { class: 'bold' }, e.name || '(sin nombre)', e.is_supervisor ? el('span', { class: 'badge-supervisor', style: 'margin-left:8px;font-size:11px' }, 'Supervisor') : null),
       el('td', {}, e.turno_base),
       el('td', {}, el('span', { class: 'badge badge-type' }, e.tipo)),
-      el('td', {}, el('span', { class: `rep-score ${repClass}`, 'data-rep': String(e.reputation) },
-        el('span', { class: 'rep-bar', style: 'width:' + String(e.reputation) + '%' }, ''),
-        el('span', { class: 'rep-num' }, String(e.reputation))
-      )),
+      featureOn('reputationSystem') ? el('td', {}, renderReputationBadge(e.reputation)) : null,
       el('td', {}, estadoBadge),
       el('td', {}, diasBadge),
       el('td', { class: 'actions' },
@@ -958,7 +1000,7 @@ async function showEmployeeDetailModal(id) {
       infoRow('Antigüedad', e.antiguedad_meses ? e.antiguedad_meses + ' meses' : '—'),
       infoRow('Fecha fin', e.fecha_fin || '—'),
       infoRow('Activo', e.activo ? 'Sí' : 'No'),
-      infoRow('Reputación', e.reputation + ' / 100'),
+      featureOn('reputationSystem') ? infoRow('Reputación', e.reputation + ' / 100') : null,
     ),
     el('div', { class: 'detail-section' },
       el('h4', {}, 'Última modificación'),
@@ -978,21 +1020,22 @@ async function showEmployeeDetailModal(id) {
       infoRow('Nro incorrecto', stats.numero_incorrecto),
       infoRow('Faltó', stats.falto),
       infoRow('Sábados trab.', stats.sabados_trabajados),
-      infoRow(el('span', {}, 'Confiabilidad', createInfoIcon('Confiabilidad: porcentaje de aceptaciones cuando fue convocado.')), confiabilidad),
+      featureOn('rankings') ? infoRow(el('span', {}, 'Confiabilidad', createInfoIcon('Confiabilidad: porcentaje de aceptaciones cuando fue convocado.')), confiabilidad) : null,
     ),
     buildIncidentsList(e)
   );
 
   showModal('Detalle: ' + safeText(e.name), body, [
     { label: 'Editar', cls: 'btn btn-secondary', action: () => openEditEmployeeModal(id) },
-    { label: 'Ver historial de impacto', cls: 'btn btn-secondary', action: () => openImpactHistoryModal(id) },
-    { label: '¿Qué pasaría si?', cls: 'btn btn-info', action: () => openSimulatorModal(id) },
+    featureOn('transparencyMode') ? { label: 'Ver historial de impacto', cls: 'btn btn-secondary', action: () => openImpactHistoryModal(id) } : null,
+    featureOn('transparencyMode') && featureOn('rankings') ? { label: '¿Qué pasaría si?', cls: 'btn btn-info', action: () => openSimulatorModal(id) } : null,
     { label: 'Reporte individual', cls: 'btn btn-info', action: () => generateEmployeePrintableReport(id) },
     { label: 'Cerrar', cls: 'btn btn-primary', action: closeModal },
-  ]);
+  ].filter(Boolean));
 }
 
 function buildIncidentsList(e) {
+  if (!featureOn('penalties') || !featureOn('reputationSystem')) return null;
   const incidents = e.incidents || [];
   if (!incidents.length) return el('div', { class: 'detail-section' }, el('h4', {}, 'Incidentes'), el('p', { class: 'muted' }, 'Sin incidentes registrados.'));
 
@@ -1033,6 +1076,7 @@ function buildIncidentsList(e) {
 }
 
 function openDescargoModal(employeeId, incidentId) {
+  if (!featureOn('penalties')) { toast('El módulo de penalizaciones está desactivado.', 'warning'); return; }
   const body = el('div', {},
     el('p', {}, 'Ingresá el texto del descargo del empleado:'),
     el('textarea', { id: 'descargo-text', class: 'textarea-full', rows: '4', placeholder: 'Descripción del descargo…' })
@@ -1056,13 +1100,14 @@ function openDescargoModal(employeeId, incidentId) {
 
 // ─── Transparencia: modal explicativo del ranking ───────────────────────────
 function openRankingExplainModal() {
+  if (!featureOn('transparencyMode') || !featureOn('rankings')) return;
   const body = el('div', {},
     el('p', {}, 'El ranking prioriza a quienes menos horas acumuladas tienen.'),
     el('p', {}, 'Las horas al 100% pesan el doble.'),
-    el('p', {}, 'La reputación mejora la posición.'),
+    featureOn('reputationSystem') ? el('p', {}, 'La reputación mejora la posición.') : null,
     el('p', {}, 'La baja confiabilidad puede afectar el orden.'),
-    el('p', {}, 'Las faltas reducen reputación.'),
-    el('p', {}, 'La recuperación mensual puede mejorar posición.'),
+    featureOn('penalties') ? el('p', {}, 'Las faltas reducen reputación.') : null,
+    featureOn('reputationSystem') ? el('p', {}, 'La recuperación mensual puede mejorar posición.') : null,
     el('p', {}, el('button', { class: 'btn btn-xs btn-link', onclick: openFormulaModal }, 'Ver fórmula exacta'))
   );
   showModal('¿Cómo se calcula el ranking?', body, [
@@ -1071,14 +1116,19 @@ function openRankingExplainModal() {
 }
 
 function openFormulaModal() {
+  if (!featureOn('transparencyMode') || !featureOn('rankings')) return;
+  const formula = featureOn('reputationSystem')
+    ? 'score = (total_horas * 3) + convocado - (reputationScore * 0.5)\nwhere total_horas = (horas_50 * 1) + (horas_100 * 2)'
+    : 'score = (total_horas * 3) + convocado\nwhere total_horas = (horas_50 * 1) + (horas_100 * 2)';
   const body = el('div', {},
     el('p', {}, 'Fórmula (técnica):'),
-    el('pre', { class: 'muted' }, 'score = (total_horas * 3) + convocado - (reputationScore * 0.5)\nwhere total_horas = (horas_50 * 1) + (horas_100 * 2)')
+    el('pre', { class: 'muted' }, formula)
   );
   showModal('Fórmula exacta', body, [{ label: 'Cerrar', cls: 'btn btn-primary', action: closeModal }]);
 }
 
 function openSaturdayExplainModal() {
+  if (!featureOn('transparencyMode') || !featureOn('saturdayRanking')) return;
   const body = el('div', {},
     el('h4', {}, 'Ranking Sábado — Cómo funciona'),
     el('ol', {},
@@ -1092,6 +1142,7 @@ function openSaturdayExplainModal() {
 }
 
 function openRecoveryExplainModal() {
+  if (!featureOn('transparencyMode') || !featureOn('reputationSystem')) return;
   const body = el('div', {},
     el('h4', {}, 'Recovery mensual — Qué hace'),
     el('p', {}, 'La recuperación mensual otorga puntos de reputación a empleados sin incidentes en el mes.'),
@@ -1106,17 +1157,20 @@ function openRecoveryExplainModal() {
 
 // ─── Transparencia: historial y simulador por empleado (solo lectura) ──────
 async function openImpactHistoryModal(empId) {
+  if (!featureOn('transparencyMode')) return;
   const state = await Models.exportState();
   const emp = state.employees[empId];
   if (!emp) { toast('Empleado no encontrado', 'error'); return; }
 
   const rows = [];
   // incidents
-  for (const inc of (emp.incidents || [])) {
+  for (const inc of (featureOn('penalties') ? (emp.incidents || []) : [])) {
     rows.push({ date: inc.ts, action: inc.reason || 'Incidente', change: (inc.delta || 0), score: Models.computeScore(Object.assign({}, emp, { reputation: Math.max(0, Math.min(100, emp.reputation + (inc.delta || 0))) })).score });
   }
   // saturday events
-  const satEvents = (state.saturdayData && state.saturdayData.events) ? state.saturdayData.events.filter(e => e.empleado_id === empId) : [];
+  const satEvents = featureOn('saturdayRanking') && state.saturdayData && state.saturdayData.events
+    ? state.saturdayData.events.filter(e => normalizeId(e.empleado_id) === normalizeId(empId))
+    : [];
   for (const ev of satEvents) {
     const action = ev.estado === 'trabajado' ? 'Sábado trabajado' : ev.estado === 'falto' ? 'Falta sábado' : 'Anotación sábado';
     const change = ev.horasReales ? (ev.horasReales + ' hs') : (ev.estado === 'falto' ? '-15 rep' : '-');
@@ -1133,6 +1187,7 @@ async function openImpactHistoryModal(empId) {
 }
 
 async function openSimulatorModal(empId) {
+  if (!featureOn('transparencyMode') || !featureOn('rankings')) return;
   const e = await Models.getEmployee(empId);
   if (!e) { toast('Empleado no encontrado', 'error'); return; }
   const base = Models.computeScore(e);
@@ -1141,29 +1196,35 @@ async function openSimulatorModal(empId) {
   const s1 = Object.assign({}, e, { stats: Object.assign({}, e.stats, { horas_50: (e.stats.horas_50 || 0) + 3 }) });
   const sc1 = Models.computeScore(s1);
 
-  // Scenario 2: falta -> reputation penalty (use config penalty 'falto')
-  const pen = APP_CONFIG.REPUTATION_PENALTIES.falto || -15;
-  const s2 = Object.assign({}, e, { reputation: Math.max(0, Math.min(100, e.reputation + pen)) });
-  const sc2 = Models.computeScore(s2);
-
-  // Scenario 3: recibe recuperación mensual
-  const rec = APP_CONFIG.REPUTATION_RECOVERY.mes_sin_incidentes || 0;
-  const s3 = Object.assign({}, e, { reputation: Math.max(0, Math.min(100, e.reputation + rec)) });
-  const sc3 = Models.computeScore(s3);
+  let sc2 = null;
+  let sc3 = null;
+  if (featureOn('reputationSystem') && featureOn('penalties')) {
+    const pen = APP_CONFIG.REPUTATION_PENALTIES.falto || -15;
+    const s2 = Object.assign({}, e, { reputation: Math.max(0, Math.min(100, e.reputation + pen)) });
+    sc2 = Models.computeScore(s2);
+  }
+  if (featureOn('reputationSystem')) {
+    const rec = APP_CONFIG.REPUTATION_RECOVERY.mes_sin_incidentes || 0;
+    const s3 = Object.assign({}, e, { reputation: Math.max(0, Math.min(100, e.reputation + rec)) });
+    sc3 = Models.computeScore(s3);
+  }
 
   const body = el('div', {},
     el('p', {}, 'Estado actual — score estimado: ' + base.score.toFixed(2)),
     el('h4', {}, '¿Qué pasaría si... (solo lectura)'),
     el('div', { class: 'sim-row' }, el('div', { class: 'sim-desc' }, 'Trabaja 3h al 50%'), el('div', { class: 'sim-result' }, 'Score: ' + sc1.score.toFixed(2))),
-    el('div', { class: 'sim-row' }, el('div', { class: 'sim-desc' }, 'Falta (penalización típica)'), el('div', { class: 'sim-result' }, 'Score: ' + sc2.score.toFixed(2))),
-    el('div', { class: 'sim-row' }, el('div', { class: 'sim-desc' }, 'Recuperación mensual'), el('div', { class: 'sim-result' }, 'Score: ' + sc3.score.toFixed(2)))
+    sc2 ? el('div', { class: 'sim-row' }, el('div', { class: 'sim-desc' }, 'Falta (penalización típica)'), el('div', { class: 'sim-result' }, 'Score: ' + sc2.score.toFixed(2))) : null,
+    sc3 ? el('div', { class: 'sim-row' }, el('div', { class: 'sim-desc' }, 'Recuperación mensual'), el('div', { class: 'sim-result' }, 'Score: ' + sc3.score.toFixed(2))) : null
   );
   // botón explicativo sobre recovery mensual
-  body.appendChild(el('div', { style: 'margin-top:8px' }, el('button', { class: 'btn btn-xs btn-info', onclick: openRecoveryExplainModal }, 'Ver cómo funciona')));
+  if (featureOn('reputationSystem')) {
+    body.appendChild(el('div', { style: 'margin-top:8px' }, el('button', { class: 'btn btn-xs btn-info', onclick: openRecoveryExplainModal }, 'Ver cómo funciona')));
+  }
   showModal('Simulador: ' + safeText(e.name), body, [{ label: 'Cerrar', cls: 'btn btn-primary', action: closeModal }]);
 }
 
 function resolveDescargoModal(employeeId, incidentId, approved) {
+  if (!featureOn('penalties')) { toast('El módulo de penalizaciones está desactivado.', 'warning'); return; }
   const body = el('div', { class: 'form-grid' },
     el('p', {}, approved ? '¿Aprobar el descargo? Esto revertirá la penalización.' : '¿Rechazar el descargo? La penalización se mantiene.'),
     formField('Supervisor ID (Obligatorio)', el('input', { id: 'resolve-sup', type: 'text', class: 'input-full' })),
@@ -1564,7 +1625,7 @@ function buildTabSabados() {
   sec.classList.add('saturday-module');
   sec.append(
     el('h2', { class: 'section-title' }, 'Sabados v1.2'),
-    el('p', { class: 'micro-explain' }, 'Módulo Sábados: seguimiento de intenciones, asignaciones y registros. Usá "Ver cómo funciona" para más detalles.'),
+    explainNode('Módulo Sábados: seguimiento de intenciones, asignaciones y registros. Usá "Ver cómo funciona" para más detalles.'),
     el('p', { class: 'section-desc' }, 'Módulo independiente de Sabados V1.2: Intenciones -> Asignaciones -> Registro -> Faltas/Recuperaciones.'),
     el('div', { class: 'card config-card' },
       el('h3', {}, 'Seleccionar sabado a gestionar'),
@@ -1581,14 +1642,18 @@ function buildTabSabados() {
       )
     ),
     el('div', { id: 'sat-mgmt-panel' }),
-    el('h3', { class: 'section-subtitle' }, 'Ranking sabado y Acciones'),
-    el('div', { class: 'card' },
-      el('div', { class: 'toolbar' },
-        el('button', { class: 'btn btn-secondary', onclick: renderRankingSabadoV12 }, 'Ver Ranking'),
-        el('button', { class: 'btn btn-info', onclick: openSaturdayExplainModal }, 'Ver cómo funciona')
-      ),
-      el('div', { id: 'saturday-ranking-list' })
-    ),
+    featureOn('saturdayRanking')
+      ? el('h3', { class: 'section-subtitle' }, 'Ranking sabado y Acciones')
+      : null,
+    featureOn('saturdayRanking')
+      ? el('div', { class: 'card' },
+        el('div', { class: 'toolbar' },
+          el('button', { class: 'btn btn-secondary', onclick: renderRankingSabadoV12 }, 'Ver Ranking'),
+          featureOn('transparencyMode') ? el('button', { class: 'btn btn-info', onclick: openSaturdayExplainModal }, 'Ver cómo funciona') : null
+        ),
+        el('div', { id: 'saturday-ranking-list' })
+      )
+      : null,
     el('h3', { class: 'section-subtitle' }, 'Historial de sabados registrados'),
     el('div', { class: 'card' },
       el('button', { class: 'btn btn-secondary', onclick: renderSaturdayListV12 }, 'Actualizar'),
@@ -1608,7 +1673,7 @@ function buildTabTurnoNoche() {
   const sec = el('div', { id: 'tab-turno_noche', class: 'tab-section' });
   sec.append(
     el('h2', { class: 'section-title' }, 'Turno Noche — Excepcional'),
-    el('p', { class: 'micro-explain' }, 'Crear y gestionar eventos Turno Noche. Independiente y compatible con modo offline.'),
+    explainNode('Crear y gestionar eventos Turno Noche. Independiente y compatible con modo offline.'),
     el('div', { class: 'card config-card' },
       el('h3', {}, 'Crear / Seleccionar evento'),
       el('div', { class: 'toolbar' },
@@ -1809,7 +1874,7 @@ async function renderNightShiftPanel() {
     try {
       if (ev.estado === 'cerrado') { toast('Evento cerrado: no se permite agregar personal', 'error'); return; }
       const empId = $id('night-add-emp').value; if (!empId) { toast('Seleccione un empleado', 'error'); return; }
-      if ((ev.personal || []).some(p => p.empleado_id === empId)) { toast('El empleado ya está en la lista', 'error'); return; }
+      if ((ev.personal || []).some(p => normalizeId(p.empleado_id) === normalizeId(empId))) { toast('El empleado ya está en la lista', 'error'); return; }
       const requiere = $id('night-add-remis').checked;
       const direccionVal = $id('night-add-direc').value.trim();
       if (requiere && !direccionVal) { toast('Dirección obligatoria cuando requiere remis', 'error'); return; }
@@ -2322,7 +2387,7 @@ async function openSaturdayV12Modal(employeeId) {
           const stateCheck = await Models.exportState();
           const sdCheck = stateCheck.saturdayData || { events: [] };
           const alreadyRegistered = (sdCheck.events || []).some(
-            ev => ev.empleado_id === employeeId && ev.fechaSabado === fechaDestino && ev.estado !== 'falto'
+            ev => normalizeId(ev.empleado_id) === normalizeId(employeeId) && ev.fechaSabado === fechaDestino && ev.estado !== 'falto'
           );
           if (alreadyRegistered) {
             toast('Este empleado ya est\u00e1 anotado para este s\u00e1bado.', 'error');
@@ -2351,14 +2416,16 @@ async function openSaturdayV12Modal(employeeId) {
 async function openAddAssignmentV12Modal(dateKey, intentions) {
   if (!intentions || intentions.length === 0) { toast('Nadie anotado.', 'warning'); return; }
 
-  // fetch ranking para la alerta y listado de supervisores
-  const [ranking, allEmps] = await Promise.all([Models.obtenerRankingSabado(), Models.listEmployees()]);
+  const [ranking, allEmps] = await Promise.all([
+    featureOn('saturdayRanking') ? Models.obtenerRankingSabado() : Promise.resolve([]),
+    Models.listEmployees()
+  ]);
   const top3Ids = ranking.slice(0, 3).map(e => e.id);
   const supervisors = (allEmps || []).filter(em => em && em.is_supervisor === true && em.activo === true);
 
   const sel = el('select', { id: 'asgnv12-event', class: 'input-full' },
     ...intentions.map(i => {
-      const emp = (allEmps || []).find(e => e.id === i.empleado_id);
+      const emp = (allEmps || []).find(e => normalizeId(e.id) === normalizeId(i.empleado_id));
       const label = emp
         ? (emp.name || emp.id) + ' \u2014 Leg. ' + (emp.legajo || '\u2014')
         : i.empleado_id;
@@ -2376,7 +2443,7 @@ async function openAddAssignmentV12Modal(dateKey, intentions) {
     formField('¿Descanso 12 horas cumplido?', el('select', { id: 'asgnv12-12hs', class: 'input-full' },
       el('option', { value: 'false' }, 'No'), el('option', { value: 'true' }, 'Si')
     )),
-    formField('Motivo Asignacion (recomendado si no está en Top 3 ranking)', el('input', { id: 'asgnv12-motivo', type: 'text', class: 'input-full', placeholder: 'Escribe el motivo aquí' })),
+    formField(featureOn('saturdayRanking') ? 'Motivo Asignacion (recomendado si no está en Top 3 ranking)' : 'Motivo Asignacion', el('input', { id: 'asgnv12-motivo', type: 'text', class: 'input-full', placeholder: 'Escribe el motivo aquí' })),
     formField('Supervisor', supSelect)
   );
 
@@ -2394,7 +2461,7 @@ async function openAddAssignmentV12Modal(dateKey, intentions) {
         const sup = $id('asgnv12-sup').value;
         if (!start || !end) { toast('Horario requerido', 'error'); return; }
 
-        if (!top3Ids.includes(empId) && !reason) {
+        if (featureOn('saturdayRanking') && !top3Ids.includes(empId) && !reason) {
           toast('Estás asignando fuera del TOP 3. Se recomienda indicar un motivo.', 'warning');
         }
         try {
@@ -2432,6 +2499,7 @@ async function renderRankingSabadoV12() {
   const cont = $id('saturday-ranking-list');
   if (!cont) return;
   cont.innerHTML = '';
+  if (!featureOn('saturdayRanking')) return;
   const rankings = await Models.obtenerRankingSabado();
 
   const tbl = el('table', { class: 'data-table' });
@@ -2480,21 +2548,21 @@ async function doRecordWeekdayExtra(employeeId) {
 function buildTabEstadisticas() {
   const sec = el('div', { id: 'tab-estadisticas', class: 'tab-section' });
   sec.append(
-    el('h2', { class: 'section-title' }, 'Estadísticas & Ranking'),
-    el('p', { class: 'micro-explain' }, 'Resumen de métricas y ranking. El botón "¿Cómo se calcula el ranking?" muestra la lógica técnica.'),
+    el('h2', { class: 'section-title' }, featureOn('rankings') ? 'Estadísticas & Ranking' : 'Estadísticas'),
+    explainNode('Resumen de métricas y ranking. El botón "¿Cómo se calcula el ranking?" muestra la lógica técnica.'),
     el('div', { class: 'toolbar' },
       el('button', { class: 'btn btn-primary', onclick: renderStats }, '🔄 Actualizar'),
-        el('button', { class: 'btn btn-secondary', onclick: doExportSuggestionsCsv }, '⬇ Exportar Excel ranking'),
-      el('button', { class: 'btn btn-info', onclick: openRankingExplainModal }, '¿Cómo se calcula el ranking?')
+      featureOn('rankings') ? el('button', { class: 'btn btn-secondary', onclick: doExportSuggestionsCsv }, '⬇ Exportar Excel ranking') : null,
+      featureOn('rankings') && featureOn('transparencyMode') ? el('button', { class: 'btn btn-info', onclick: openRankingExplainModal }, '¿Cómo se calcula el ranking?') : null
     ),
     el('div', { id: 'stats-summary', class: 'stats-cards' }),
-    el('div', { id: 'ns-exec-root', class: 'ns-exec-root' }),
-    el('div', { id: 'stats-ranking' }),
-    el('div', { class: 'section-note' }, el('strong', {}, 'Nota:'), ' El ranking de sábado es independiente del semanal. Solo cuenta lo trabajado el sábado y no modifica el ranking general.'),
-    el('h3', { class: 'section-subtitle' }, 'Top incumplidores'),
-    el('div', { id: 'stats-offenders' }),
-    el('h3', { class: 'section-subtitle' }, 'Audit log — asignaciones fuera del top sugerido'),
-    el('div', { id: 'stats-auditlog' })
+    featureOn('advancedStats') ? el('div', { id: 'ns-exec-root', class: 'ns-exec-root' }) : null,
+    featureOn('rankings') ? el('div', { id: 'stats-ranking' }) : null,
+    featureOn('rankings') && featureOn('saturdayRanking') ? el('div', { class: 'section-note' }, el('strong', {}, 'Nota:'), ' El ranking de sábado es independiente del semanal. Solo cuenta lo trabajado el sábado y no modifica el ranking general.') : null,
+    featureOn('advancedStats') && featureOn('penalties') ? el('h3', { class: 'section-subtitle' }, 'Top incumplidores') : null,
+    featureOn('advancedStats') && featureOn('penalties') ? el('div', { id: 'stats-offenders' }) : null,
+    featureOn('advancedStats') && featureOn('rankings') ? el('h3', { class: 'section-subtitle' }, 'Audit log — asignaciones fuera del top sugerido') : null,
+    featureOn('advancedStats') && featureOn('rankings') ? el('div', { id: 'stats-auditlog' }) : null
   );
   renderStats();
   return sec;
@@ -2502,16 +2570,19 @@ function buildTabEstadisticas() {
 
 function renderStats() {
   renderSummaryCards();
-  renderRankingTable();
-  renderTopOffenders();
-  renderAuditLogs();
-  renderNightShiftExecutive();
+  if (featureOn('rankings')) renderRankingTable();
+  if (featureOn('advancedStats')) {
+    if (featureOn('penalties')) renderTopOffenders();
+    if (featureOn('rankings')) renderAuditLogs();
+    renderNightShiftExecutive();
+  }
 }
 
 async function renderNightShiftExecutive() {
   const root = $id('ns-exec-root');
   if (!root) return;
   root.innerHTML = '';
+  if (!featureOn('advancedStats')) return;
   // Header with month selector
   const ymInput = el('input', { id: 'ns-month-select', type: 'month', class: 'input-sm' });
   // default to current month
@@ -2571,14 +2642,16 @@ async function renderSummaryCards() {
   const active = all.filter(e => e.activo);
   const total50 = active.reduce((s, e) => s + e.stats.horas_50, 0);
   const total100 = active.reduce((s, e) => s + e.stats.horas_100, 0);
-  const avgRep = active.length ? (active.reduce((s, e) => s + e.reputation, 0) / active.length).toFixed(1) : '—';
 
   const cards = [
     { label: 'Empleados activos', value: active.length, icon: '👥' },
     { label: 'Total horas 50%', value: total50, icon: '⏱' },
     { label: 'Total horas 100%', value: total100, icon: '⏱' },
-    { label: 'Reputación promedio', value: avgRep + ' / 100', icon: '⭐' },
   ];
+  if (featureOn('reputationSystem')) {
+    const avgRep = active.length ? (active.reduce((s, e) => s + e.reputation, 0) / active.length).toFixed(1) : '—';
+    cards.push({ label: 'Reputación promedio', value: avgRep + ' / 100', icon: '⭐' });
+  }
   // Night shift monthly stats (Turno Noche)
   try {
     const ym = new Date().toISOString().slice(0,7);
@@ -2600,6 +2673,7 @@ async function renderRankingTable() {
   const cont = $id('stats-ranking');
   if (!cont) return;
   cont.innerHTML = '';
+  if (!featureOn('rankings')) return;
   if (isMobileMode()) { await renderRankingCards(); return; }
   const list = await Models.suggestionList();
   if (!list.length) { cont.appendChild(el('div', { class: 'empty-state' }, 'No hay empleados activos.')); return; }
@@ -2608,7 +2682,8 @@ async function renderRankingTable() {
   tbl.appendChild(el('thead', {}, el('tr', {},
     el('th', {}, '#'), el('th', {}, 'Nombre'), el('th', {}, 'Turno'),
     el('th', {}, el('span', {}, 'Score ↑', createInfoIcon('Score: combina horas acumuladas, reputación y confiabilidad.'))), el('th', {}, 'Horas tot.'),
-    el('th', {}, el('span', {}, 'Convocado', createInfoIcon('Veces convocado: indica cuántas veces se intentó contactar al empleado.'))), el('th', {}, el('span', {}, 'Confiabilidad', createInfoIcon('Confiabilidad: % de respuestas positivas cuando fue convocado.'))), el('th', {}, el('span', {}, 'Reputación', createInfoIcon('Reputación: 0-100; penaliza faltas y no respuesta.'))),
+    el('th', {}, el('span', {}, 'Convocado', createInfoIcon('Veces convocado: indica cuántas veces se intentó contactar al empleado.'))), el('th', {}, el('span', {}, 'Confiabilidad', createInfoIcon('Confiabilidad: % de respuestas positivas cuando fue convocado.'))),
+    featureOn('reputationSystem') ? el('th', {}, el('span', {}, 'Reputación', createInfoIcon('Reputación: 0-100; penaliza faltas y no respuesta.'))) : null,
     el('th', {}, 'Acciones')
   )));
   const tbody = el('tbody');
@@ -2623,10 +2698,7 @@ async function renderRankingTable() {
       el('td', {}, String(m.total_horas)),
       el('td', {}, String(m.convocado)),
       el('td', { title: 'Se calcula según asistencia cuando fue convocado. Si baja del 50%, afecta la posición.' }, (m.confiabilidad * 100).toFixed(0) + '%'),
-      el('td', {}, el('span', { class: `rep-score ${e.reputation >= 80 ? 'rep-high' : e.reputation >= 50 ? 'rep-mid' : 'rep-low'}`, title: 'Las faltas reducen reputación. Puede recuperarse con buen comportamiento y cierres mensuales.', 'data-rep': String(e.reputation) },
-        el('span', { class: 'rep-bar', style: 'width:' + String(e.reputation) + '%' }, ''),
-        el('span', { class: 'rep-num' }, String(e.reputation))
-      )),
+      featureOn('reputationSystem') ? el('td', {}, renderReputationBadge(e.reputation, 'Las faltas reducen reputación. Puede recuperarse con buen comportamiento y cierres mensuales.')) : null,
       el('td', { class: 'actions' },
         el('button', { class: 'btn btn-sm btn-primary', onclick: () => openAssignModal(e.id, list.slice(0, 10).map(x => x.id)) }, 'Asignar')
       )
@@ -2640,6 +2712,7 @@ async function renderRankingCards() {
   const cont = $id('stats-ranking');
   if (!cont) return;
   cont.innerHTML = '';
+  if (!featureOn('rankings')) return;
   const list = await Models.suggestionList();
   if (!list.length) { cont.appendChild(el('div', { class: 'empty-state' }, 'No hay empleados activos.')); return; }
   const topIds = list.slice(0, 10).map(x => x.id);
@@ -2647,7 +2720,6 @@ async function renderRankingCards() {
   list.forEach((e, idx) => {
     const m = e.__meta;
     const rankStr = idx < 3 ? ['🥇', '🥈', '🥉'][idx] : String(idx + 1);
-    const repClass = e.reputation >= 80 ? 'rep-high' : e.reputation >= 50 ? 'rep-mid' : 'rep-low';
     cards.appendChild(el('div', { class: 'ranking-card' },
       el('div', { class: 'ranking-card-header' },
         el('span', { class: 'ranking-card-rank' }, rankStr),
@@ -2670,15 +2742,12 @@ async function renderRankingCards() {
           el('div', { class: 'ranking-card-stat-val' }, String(e.stats?.horas_100 || 0)),
           el('div', { class: 'ranking-card-stat-lbl' }, 'H. 100%')
         ),
-        el('div', { class: 'ranking-card-stat' },
-            el('div', { class: 'ranking-card-stat-val' },
-            el('span', { class: `rep-score ${repClass}`, title: 'Las faltas reducen reputación. Puede recuperarse con buen comportamiento y cierres mensuales.', 'data-rep': String(e.reputation) },
-              el('span', { class: 'rep-bar', style: 'width:' + String(e.reputation) + '%' }, ''),
-              el('span', { class: 'rep-num' }, String(e.reputation))
-            )
-          ),
-          el('div', { class: 'ranking-card-stat-lbl' }, el('span', {}, 'Rep.', createInfoIcon('Reputación: 0-100; afecta la prioridad en el ranking.')))
-        )
+        featureOn('reputationSystem')
+          ? el('div', { class: 'ranking-card-stat' },
+            el('div', { class: 'ranking-card-stat-val' }, renderReputationBadge(e.reputation, 'Las faltas reducen reputación. Puede recuperarse con buen comportamiento y cierres mensuales.')),
+            el('div', { class: 'ranking-card-stat-lbl' }, el('span', {}, 'Rep.', createInfoIcon('Reputación: 0-100; afecta la prioridad en el ranking.')))
+          )
+          : null
       ),
       el('div', { class: 'ranking-card-actions' },
         el('button', { class: 'btn btn-sm btn-info',    onclick: () => openCallModal(e.id) }, '📞 Intento'),
@@ -2694,6 +2763,7 @@ async function renderTopOffenders() {
   const cont = $id('stats-offenders');
   if (!cont) return;
   cont.innerHTML = '';
+  if (!featureOn('advancedStats') || !featureOn('penalties')) return;
   const all = await Models.listEmployees();
   const sorted = all
     .map(e => ({ ...e, _total: (e.stats.falto || 0) + (e.stats.no_respondio || 0) + (e.stats.numero_incorrecto || 0) + (e.stats.rechazo || 0) }))
@@ -2710,7 +2780,7 @@ async function renderTopOffenders() {
   tbl.appendChild(el('thead', {}, el('tr', {},
     el('th', {}, 'Nombre'), el('th', {}, 'Faltó'), el('th', {}, 'No respondió'),
     el('th', {}, 'Nro incorrecto'), el('th', {}, 'Rechazó'),
-    el('th', {}, 'Reputación'), el('th', {}, 'Total incump.')
+    featureOn('reputationSystem') ? el('th', {}, 'Reputación') : null, el('th', {}, 'Total incump.')
   )));
   const tbody = el('tbody');
   sorted.forEach(e => {
@@ -2720,10 +2790,7 @@ async function renderTopOffenders() {
       el('td', {}, String(e.stats.no_respondio || 0)),
       el('td', {}, String(e.stats.numero_incorrecto || 0)),
       el('td', {}, String(e.stats.rechazo || 0)),
-      el('td', {}, el('span', { class: `rep-score ${e.reputation >= 80 ? 'rep-high' : e.reputation >= 50 ? 'rep-mid' : 'rep-low'}`, 'data-rep': String(e.reputation) },
-        el('span', { class: 'rep-bar', style: 'width:' + String(e.reputation) + '%' }, ''),
-        el('span', { class: 'rep-num' }, String(e.reputation))
-      )),
+      featureOn('reputationSystem') ? el('td', {}, renderReputationBadge(e.reputation)) : null,
       el('td', { class: 'bold' }, String(e._total))
     ));
   });
@@ -2735,6 +2802,7 @@ async function renderAuditLogs() {
   const cont = $id('stats-auditlog');
   if (!cont) return;
   cont.innerHTML = '';
+  if (!featureOn('advancedStats') || !featureOn('rankings')) return;
   const logs = await Models.getAuditLogs();
   if (!logs.length) {
     cont.appendChild(el('p', { class: 'muted' }, 'Sin registros de auditoría.'));
@@ -2916,14 +2984,16 @@ function buildDataPanel() {
     )
   );
 
-  const recovCard = el('div', { class: 'card config-card' },
-    el('h3', {}, 'Recuperación mensual de reputación'),
-    el('p', { class: 'muted' }, `+${2} de reputación a empleados activos sin penalizaciones en el mes elegido. Ejecutá una sola vez por cierre mensual.`),
-    el('div', { class: 'toolbar' },
-      el('input', { id: 'recovery-month', type: 'month', class: 'input-sm', value: new Date().toISOString().slice(0, 7) }),
-      el('button', { class: 'btn btn-success', onclick: doApplyMonthlyRecovery }, 'Aplicar recuperación mensual')
+  const recovCard = featureOn('reputationSystem')
+    ? el('div', { class: 'card config-card' },
+      el('h3', {}, 'Recuperación mensual de reputación'),
+      el('p', { class: 'muted' }, `+${2} de reputación a empleados activos sin penalizaciones en el mes elegido. Ejecutá una sola vez por cierre mensual.`),
+      el('div', { class: 'toolbar' },
+        el('input', { id: 'recovery-month', type: 'month', class: 'input-sm', value: new Date().toISOString().slice(0, 7) }),
+        el('button', { class: 'btn btn-success', onclick: doApplyMonthlyRecovery }, 'Aplicar recuperación mensual')
+      )
     )
-  );
+    : null;
 
   return el('div', {}, card, filterCard, recovCard);
 }
@@ -2941,26 +3011,29 @@ function buildEmployeeExportRows(data) {
   return (data.employeesList || [])
     .map(id => data.employees[id])
     .filter(Boolean)
-    .map(e => ({
-      id: e.id,
-      legajo: e.legajo || '',
-      nombre: e.name,
-      puesto: e.puesto || '',
-      telefono: e.telefono || '',
-      turno: e.turno_base,
-      tipo: e.tipo,
-      antiguedad_meses: e.antiguedad_meses || 0,
-      fecha_fin: e.fecha_fin || '',
-      activo: e.activo ? 'Si' : 'No',
-      reputacion: e.reputation,
-      horas_50: e.stats.horas_50,
-      horas_100: e.stats.horas_100,
-      convocado: e.stats.convocado,
-      acepto: e.stats.acepto,
-      rechazo: e.stats.rechazo,
-      falto: e.stats.falto,
-      sabados_trabajados: e.stats.sabados_trabajados,
-    }));
+    .map(e => {
+      const row = {
+        id: e.id,
+        legajo: e.legajo || '',
+        nombre: e.name,
+        puesto: e.puesto || '',
+        telefono: e.telefono || '',
+        turno: e.turno_base,
+        tipo: e.tipo,
+        antiguedad_meses: e.antiguedad_meses || 0,
+        fecha_fin: e.fecha_fin || '',
+        activo: e.activo ? 'Si' : 'No',
+        horas_50: e.stats.horas_50,
+        horas_100: e.stats.horas_100,
+        convocado: e.stats.convocado,
+        acepto: e.stats.acepto,
+        rechazo: e.stats.rechazo,
+        falto: e.stats.falto,
+        sabados_trabajados: e.stats.sabados_trabajados,
+      };
+      if (featureOn('reputationSystem')) row.reputacion = e.reputation;
+      return row;
+    });
 }
 
 async function doExportEmployeesCsv() {
@@ -3004,18 +3077,22 @@ async function doRunSystemAudit() {
 }
 
 async function doExportSuggestionsCsv() {
+  if (!featureOn('rankings')) { toast('El ranking está desactivado para esta empresa.', 'warning'); return; }
   const list = await Models.suggestionList();
-  const rankingData = list.map((emp, index) => ({
-    Posicion: index + 1,
-    Nombre: emp.name,
-    Turno: emp.turno_base,
-    Tipo: emp.tipo,
-    Score: Number(emp.__meta.score).toFixed(2),
-    Reputacion: emp.reputation,
-    Horas_50: emp.stats.horas_50,
-    Horas_100: emp.stats.horas_100,
-    Convocado: emp.stats.convocado
-  }));
+  const rankingData = list.map((emp, index) => {
+    const row = {
+      Posicion: index + 1,
+      Nombre: emp.name,
+      Turno: emp.turno_base,
+      Tipo: emp.tipo,
+      Score: Number(emp.__meta.score).toFixed(2),
+      Horas_50: emp.stats.horas_50,
+      Horas_100: emp.stats.horas_100,
+      Convocado: emp.stats.convocado
+    };
+    if (featureOn('reputationSystem')) row.Reputacion = emp.reputation;
+    return row;
+  });
 
   const encabezado = [
     'SISTEMA HORAS EXTRAS — ESTADISTICAS & RANKING',
@@ -3062,19 +3139,72 @@ async function doExportFilteredEvents() {
 function doImportJson() {
   const file = $id('import-json-file')?.files?.[0];
   if (!file) { toast('Seleccioná un archivo JSON para importar.', 'error'); return; }
-  confirmModal('¿Reemplazar TODOS los datos locales con el contenido del archivo JSON? Esta acción no se puede deshacer.', () => {
+  confirmModal('Importar datos desde archivo JSON? El proceso intentará fusionar y validar sin sobrescribir historial. Continuar?', () => {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
-        await Models.importState(data);
+        const res = await Models.importState(data);
+
+        // Refresh UI state after import (only if import succeeded)
         await renderEmployees();
         await renderStats();
         await renderCallHistory();
         await renderSaturdayList();
         await refreshShiftIndicator();
-        toast('Datos importados correctamente.', 'success');
-      } catch (e) { toast('Error al importar: ' + e.message, 'error'); }
+
+        // If import returned a summary, show a modal with details
+        if (res && typeof res === 'object') {
+          const sum = res;
+          const addedCount = Object.values(sum.added || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+          const ignoredCount = Object.values(sum.ignored || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+          let conflictsCount = 0;
+          if (Array.isArray(sum.conflicts)) conflictsCount = sum.conflicts.length;
+          else conflictsCount = Object.values(sum.conflicts || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+          const auditAppendedCount = Array.isArray(sum.auditAppended) ? sum.auditAppended.length : (typeof sum.auditAppended === 'number' ? sum.auditAppended : 0);
+          const warnings = Array.isArray(sum.warnings) ? sum.warnings : (sum.warnings ? [String(sum.warnings)] : []);
+
+          const body = el('div', {},
+            el('p', {}, 'Importación finalizada. Resumen:'),
+            el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' },
+              el('div', { style: 'min-width:180px' }, infoRow('Entidades agregadas', addedCount)),
+              el('div', { style: 'min-width:180px' }, infoRow('Entidades ignoradas', ignoredCount)),
+              el('div', { style: 'min-width:180px' }, infoRow('Conflictos', conflictsCount)),
+              el('div', { style: 'min-width:180px' }, infoRow('Audit logs añadidos', auditAppendedCount))
+            ),
+            warnings.length ? el('div', { style: 'margin-top:10px' }, el('h4', {}, 'Advertencias'), el('ul', {}, ...warnings.map(w => el('li', {}, String(w))))) : null,
+            el('div', { style: 'margin-top:12px;display:flex;gap:8px' },
+              el('button', { class: 'btn btn-secondary', onclick: closeModal }, 'Cerrar'),
+              el('button', { class: 'btn btn-outline', onclick: () => { downloadBlob(new Blob([JSON.stringify(sum, null, 2)], { type: 'application/json' }), makeFilename('import_summary', 'json')); } }, 'Descargar resumen')
+            )
+          );
+          showModal('Resumen de Importación', body, []);
+        } else {
+          toast('Datos importados correctamente.', 'success');
+        }
+      } catch (e) {
+        // Handle validation / destructive errors specially
+        if (e && e.code === 'IMPORT_VALIDATION_FAILED') {
+          const details = e.details || e.message || 'Estructura inválida.';
+          const body = el('div', {},
+            el('p', {}, 'El archivo JSON no cumple la estructura requerida. Importación cancelada.'),
+            el('pre', { style: 'white-space:pre-wrap;max-height:300px;overflow:auto;background:#f7f7f7;padding:8px;border-radius:4px' }, safeText(typeof details === 'string' ? details : JSON.stringify(details, null, 2)))
+          );
+          showModal('Validación fallida', body, [ { label: 'Cerrar', action: closeModal } ]);
+          toast('Importación cancelada: validación fallida.', 'error');
+        } else if (e && e.code === 'IMPORT_DESTRUCTIVE_BLOCKED') {
+          const details = e.details || e.message || 'Operación destructiva detectada.';
+          const body = el('div', {},
+            el('p', {}, 'El import fue bloqueado porque intentaría realizar operaciones destructivas (borrado o reemplazo de historial).'),
+            el('pre', { style: 'white-space:pre-wrap;max-height:300px;overflow:auto;background:#f7f7f7;padding:8px;border-radius:4px' }, safeText(typeof details === 'string' ? details : JSON.stringify(details, null, 2))),
+            el('p', { style: 'margin-top:8px' }, 'Verifique el archivo y vuelva a intentar con una versión no destructiva o contacte al administrador.')
+          );
+          showModal('Importación bloqueada', body, [ { label: 'Cerrar', action: closeModal } ]);
+          toast('Importación bloqueada: destructiva.', 'error');
+        } else {
+          toast('Error al importar: ' + (e && e.message ? e.message : String(e)), 'error');
+        }
+      }
     };
     reader.readAsText(file, 'UTF-8');
   });
@@ -3153,7 +3283,7 @@ async function generatePrintableReport() {
         <td><span class="badge-turno ${e.turno_base === 'mañana' ? 't-m' : 't-t'}">${e.turno_base}</span></td>
         <td><span class="badge-tipo">${e.tipo}</span></td>
         <td>${e.activo ? 'Activo' : '<em>Inactivo</em>'}</td>
-        <td><strong>${e.reputation}</strong></td>
+        ${featureOn('reputationSystem') ? `<td><strong>${e.reputation}</strong></td>` : ''}
         <td>${e.stats.horas_50}</td>
         <td>${e.stats.horas_100}</td>
         <td>${e.stats.convocado}</td>
@@ -3210,7 +3340,7 @@ async function generatePrintableReport() {
     <thead>
       <tr>
         <th>#</th><th>ID</th><th>Legajo</th><th>Nombre</th><th>Puesto</th><th>Turno</th><th>Tipo</th><th>Estado</th>
-        <th>Rep.</th><th>Hs 50%</th><th>Hs 100%</th>
+        ${featureOn('reputationSystem') ? '<th>Rep.</th>' : ''}<th>Hs 50%</th><th>Hs 100%</th>
         <th>Conv.</th><th>Aceptó</th><th>Faltó</th><th>Sáb.</th>
       </tr>
     </thead>
@@ -3259,7 +3389,6 @@ async function doExportReportXls() {
     'Estado': e.activo ? 'Activo' : 'Inactivo',
     'Antigüedad (m)': e.antiguedad_meses || 0,
     'Fecha fin': e.fecha_fin || '',
-    'Reputación': e.reputation,
     'Hs 50%': e.stats.horas_50,
     'Hs 100%': e.stats.horas_100,
     'Convocado': e.stats.convocado,
@@ -3268,6 +3397,11 @@ async function doExportReportXls() {
     'Faltó': e.stats.falto,
     'Sáb. trabajados': e.stats.sabados_trabajados,
   }));
+  if (!featureOn('reputationSystem')) {
+    xlsRows.forEach(row => { delete row['Reputación']; });
+  } else {
+    xlsRows.forEach((row, index) => { row['Reputación'] = rows[index].reputation; });
+  }
 
   downloadBlob(toXLS(xlsRows, 'Informe ' + monthValue), makeFilename('informe_' + monthValue, 'xls'));
   toast('XLS de informe descargado (' + rows.length + ' empleados).', 'success');
@@ -3294,10 +3428,10 @@ function infoRow(label, value) {
 async function generateEmployeePrintableReport(id) {
   const e = await Models.getEmployee(id);
   if (!e) { toast('Empleado no encontrado.', 'error'); return; }
-  const confiabilidad = e.stats.convocado > 0
+  const confiabilidad = featureOn('rankings') && e.stats.convocado > 0
     ? ((e.stats.acepto / e.stats.convocado) * 100).toFixed(1) + '%'
     : 'N/A';
-  const incRows = (e.incidents || []).map(inc =>
+  const incRows = (!featureOn('penalties') ? [] : (e.incidents || [])).map(inc =>
     `<tr>
       <td>${new Date(inc.ts).toLocaleDateString('es-AR')}</td>
       <td>${inc.reason}</td>
@@ -3338,8 +3472,8 @@ async function generateEmployeePrintableReport(id) {
     <div class="row"><span class="lbl">Antiguedad:</span><span>${e.antiguedad_meses} meses</span></div>
     <div class="row"><span class="lbl">Fecha fin contrato:</span><span>${e.fecha_fin || '--'}</span></div>
     <div class="row"><span class="lbl">Activo:</span><span>${e.activo ? 'Si' : 'No'}</span></div>
-    <div class="row"><span class="lbl">Reputacion:</span><span>${e.reputation} / 100</span></div>
-    <div class="row"><span class="lbl">Confiabilidad:</span><span>${confiabilidad}</span></div>
+    ${featureOn('reputationSystem') ? `<div class="row"><span class="lbl">Reputacion:</span><span>${e.reputation} / 100</span></div>` : ''}
+    ${featureOn('rankings') ? `<div class="row"><span class="lbl">Confiabilidad:</span><span>${confiabilidad}</span></div>` : ''}
     <div class="row"><span class="lbl">Horas 50%:</span><span>${e.stats.horas_50}</span></div>
     <div class="row"><span class="lbl">Horas 100%:</span><span>${e.stats.horas_100}</span></div>
     <div class="row"><span class="lbl">Convocado:</span><span>${e.stats.convocado}</span></div>
@@ -3350,13 +3484,13 @@ async function generateEmployeePrintableReport(id) {
     <div class="row"><span class="lbl">Falto:</span><span>${e.stats.falto}</span></div>
     <div class="row"><span class="lbl">Sabados trabajados:</span><span>${e.stats.sabados_trabajados}</span></div>
   </div>
-  <h2>Historial de incidentes (${(e.incidents || []).length})</h2>
+  ${featureOn('penalties') ? `<h2>Historial de incidentes (${(e.incidents || []).length})</h2>
   ${incRows ? `<table>
     <thead><tr>
       <th>Fecha</th><th>Motivo</th><th>Delta rep.</th><th>Estado</th><th>Descargo</th>
     </tr></thead>
     <tbody>${incRows}</tbody>
-  </table>` : '<p style="color:#777">Sin incidentes registrados.</p>'}
+  </table>` : '<p style="color:#777">Sin incidentes registrados.</p>'}` : ''}
   <div class="footer">Generado: ${new Date().toLocaleString()} - Horas Extras V2 (offline)</div>
 </body>
 </html>`;
@@ -3369,6 +3503,7 @@ async function generateEmployeePrintableReport(id) {
 // --- Cierre mensual ----------------------------------------------------------
 
 function doApplyMonthlyRecovery() {
+  if (!featureOn('reputationSystem')) { toast('El sistema de reputación está desactivado.', 'warning'); return; }
   const month = $id('recovery-month')?.value;
   if (!month) { toast('Selecciona el mes.', 'error'); return; }
   confirmModal(
@@ -3393,8 +3528,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Firebase connection check
   if (APP_CONFIG.FIREBASE_ENABLED) {
     try {
-      const { default: store } = await import('./storage/index.js');
-      await store.load();
+      await Models.system.verifyStorageConnection();
       console.log('Firebase connected successfully');
     } catch (e) {
       console.log('Firebase connection failed');

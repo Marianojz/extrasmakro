@@ -34,7 +34,7 @@
     <!-- Firebase CDN: expone módulos globalmente antes de cargar la app -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-      import { getDatabase, ref, set, get, update, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+      import { getDatabase, ref, set, get, runTransaction, update, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
       import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
       window.firebaseModules = {
@@ -43,10 +43,19 @@
         ref,
         set,
         get,
+        runTransaction,
         update,
         remove,
         getAuth,
         signInAnonymously
+      };
+    </script>
+
+    <!-- Supabase CDN: cliente JavaScript para PostgreSQL -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script type="module">
+      window.supabaseModules = {
+        createClient: supabase.createClient
       };
     </script>
 

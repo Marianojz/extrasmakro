@@ -110,7 +110,8 @@ FASE 3B CERRADA FORMALMENTE
 Resumen: Estabilización completada — versión estructuralmente coherente.
 
 - Reset encapsulado en `models`: las operaciones de reset y re-inicialización de estado se realizan exclusivamente a través de funciones en `src/models.js`, preservando invariantes y propietarios de esquema.
-- La UI **no accede directamente** al adapter ni manipula el `store` de forma síncrona: todas las interacciones con persistencia están mediadas por `models`.
+- La UI **no accede directamente** al adapter ni manipula el `store`: todas las interacciones operativas pasan por `src/api/apiLayer.js` y de allí a `models`.
+- Boundary operativo formalizado: el flujo oficial queda definido como `UI -> apiLayer -> models -> store/adapters`, con `apiLayer` centralizando locks, control async, validaciones, errores y hooks de observabilidad futura.
 - `reopenNightShiftEvent` está bloqueado si `horas_aplicadas === true` para evitar inconsistencias contables.
 - Snapshot obligatorio en cierre de Turno Noche: al cerrar un evento se genera y persiste un snapshot inmutable del estado del evento para auditoría y consultas históricas.
 - `horas_aplicadas` protege contra doble suma: una bandera/indicador en el snapshot evita que las horas se vuelvan a aplicar al estado acumulado.
@@ -188,6 +189,8 @@ Roadmap Activo (actualizado)
 
 Nota: Sistema estructuralmente estable en modo offline; la transición a Fase 4 (Firebase) requiere auditoría adicional sobre llamadas async y concurrencia.
 
+Riesgo residual vigente: la compatibilidad con la API plana legacy sobre `apiLayer` sigue coexistiendo con la API namespaced; no representa bypass, pero conviene converger gradualmente para simplificar observabilidad y contratos.
+
 ---
 
 Documentación de Configuración (referencia)
@@ -217,5 +220,4 @@ Referencias
 - `src/config.js` (`NIGHT_SHIFT_CONFIG`, `NIGHT_SHIFT_STRUCTURE`, `DEBUG_MODE`)
 - `src/utils.js` (`debugLog`)
 - `docs/AUDITORIA_TECNICA_TOTAL_v3.md` (evidencias de verificación y recomendaciones)
-
 

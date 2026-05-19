@@ -2,17 +2,26 @@
 // Configuración global de la aplicación — Horas Extras V2
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Para activar Firebase cuando tengas conexión e instales dependencias:
+// Para activar Supabase:
+//   1. Completar SUPABASE_URL y SUPABASE_KEY aquí con tus credenciales.
+//   2. Cambiar STORAGE_BACKEND a 'supabase'.
+//   3. Agregar el script de Supabase CDN en index.html.
+//   4. Crear la tabla `app_state` en Supabase (ver docs).
+//
+// Para activar Firebase (alternativa):
 //   1. Completar firebaseConfig.js con las credenciales reales.
-//   2. Cambiar FIREBASE_ENABLED a true aquí.
+//   2. Cambiar STORAGE_BACKEND a 'firebase'.
 //   3. Ejecutar: npm install firebase
-//   4. Los métodos del adapter Firebase son async → la app usará await automáticamente.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const APP_CONFIG = {
-  /** Poner en true cuando Firebase esté configurado y las deps instaladas */
-  FIREBASE_ENABLED: true,
+  /** Backend de storage: 'local' | 'firebase' | 'supabase' */
+  STORAGE_BACKEND: 'firebase',
+
+  /** Credenciales de Supabase (requeridas si STORAGE_BACKEND === 'supabase') */
+  SUPABASE_URL: 'https://TU_PROYECTO.supabase.co',
+  SUPABASE_KEY: 'TU_ANON_KEY_AQUI',
 
   /** Clave de localStorage — incrementar si el esquema de datos cambia (fuerza migración) */
   STORAGE_KEY: 'horas_extras_v2_v1',
