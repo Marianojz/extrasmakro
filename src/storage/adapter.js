@@ -328,3 +328,43 @@ export function buildGranularOperations(previousState, nextState) {
 
   return operations;
 }
+
+/**
+ * Merge helper for employees (shallow, conflict-detecting).
+ * - Performs a shallow merge: {...prev, ...incoming}
+ * - Detects conflicts by version or updatedAt when provided and throws an error with code 'PATCH_CONFLICT'
+ * - Ensures updatedAt and a lightweight version are set on the merged entity
+ */
+export function safeEmployeeMerge(prev = null, incoming = {}, options = {}) {
+  const prevEmp = prev && typeof prev === 'object' ? prev : null;
+  const inc = incoming && typeof incoming === 'object' ? incoming : {};
+
+  // Version-based conflict detection (optimistic)
+  if (prevEmp && inc.version !== undefined && prevEmp.version !== undefined && Number(inc.version) !== Number(prevEmp.version)) {
+    const e = new Error('PATCH_CONFLICT: version mismatch');
+    e.code = 'PATCH_CONFLICT';
+    e.details = { prevVersion: prevEmp.version, incomingVersion: inc.version };
+    throw e;
+  }
+
+  // updatedAt-based conflict detection when caller supplies updatedAt
+  if (prevEmp && inc.updatedAt !== undefined && Number(prevEmp.updatedAt) > Number(inc.updatedAt)) {
+    const e = new Error('PATCH_CONFLICT: stale update (updatedAt)');
+    e.code = 'PATCH_CONFLICT';
+    e.details = { prevUpdatedAt: prevEmp.updatedAt, incomingUpdatedAt: inc.updatedAt };
+    throw e;
+  }
+
+  const merged = { ...(prevEmp || {}), ...inc };
+  merged.updatedAt = Date.now();
+  // Lightweight version bump: prefer prevEmp.version > incoming.version -> prev+1, else incoming+1, else 1
+  if (prevEmp && Number.isFinite(Number(prevEmp.version))) {
+    merged.version = Number(prevEmp.version) + 1;
+  } else if (inc && Number.isFinite(Number(inc.version))) {
+    merged.version = Number(inc.version) + 1;
+  } else {
+    merged.version = 1;
+  }
+
+  return merged;
+}

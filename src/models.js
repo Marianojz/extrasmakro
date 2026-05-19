@@ -13,6 +13,13 @@ import { INITIAL_STATE, resolveStateMutation, skipStateWrite, withoutLegacyState
 import { debugLog, generateId } from './utils.js';
 import { normalizeId, generateEntityId } from './utils_id.js';
 
+// Ensure runtime telemetry namespace compatibility: new name __HX_RUNTIME__ but keep __EXTRAS_RUNTIME__ as alias
+if (typeof window !== 'undefined') {
+  window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || window.__EXTRAS_RUNTIME__ || {};
+  // keep legacy alias pointing to same object
+  window.__EXTRAS_RUNTIME__ = window.__HX_RUNTIME__;
+}
+
 // ─── Utilidades internas ─────────────────────────────────────────────────────
 
 function now() {
@@ -2408,6 +2415,94 @@ async function runSystemAudit() {
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
 
+// --- Employee patching helpers ------------------------------------------------
+/**
+ * Normalize various forms of an employee patch into a canonical structure:
+ * { id, changes, updatedAt, correlationId }
+ */
+function normalizeEmployeePatch(patchOrId, maybeChanges) {
+  if (!patchOrId) throw new Error('Invalid patch');
+  if (typeof patchOrId === 'string') {
+    return { id: String(patchOrId), changes: (maybeChanges && typeof maybeChanges === 'object') ? structuredClone(maybeChanges) : {}, updatedAt: (maybeChanges && (maybeChanges.updatedAt || maybeChanges.ts || maybeChanges.timestamp)) || null, correlationId: (maybeChanges && maybeChanges.correlationId) || null };
+  }
+  if (typeof patchOrId === 'object') {
+    const id = String(patchOrId.id || patchOrId.employeeId || patchOrId.empId || patchOrId._id || '');
+    const changes = patchOrId.changes || patchOrId.patch || patchOrId.data || {};
+    const updatedAt = patchOrId.updatedAt || patchOrId.ts || patchOrId.timestamp || (changes && (changes.updatedAt || changes.ts || changes.timestamp)) || null;
+    const correlationId = patchOrId.correlationId || patchOrId.corrId || null;
+    return { id, changes: structuredClone(changes), updatedAt, correlationId };
+  }
+  throw new Error('Unsupported patch format');
+}
+
+/**
+ * Apply a granular patch to a single employee with lightweight conflict detection.
+ * Throws error with code 'PATCH_CONFLICT' when remote is newer than provided updatedAt.
+ */
+async function patchEmployee(patchOrId, maybeChanges, user) {
+  const p = normalizeEmployeePatch(patchOrId, maybeChanges);
+  // Telemetry init
+  if (typeof window !== 'undefined') {
+    window.__EXTRAS_RUNTIME__ = window.__EXTRAS_RUNTIME__ || {};
+    window.__EXTRAS_RUNTIME__.employeePatchCount = (window.__EXTRAS_RUNTIME__.employeePatchCount || 0) + 1;
+  }
+  console.info('[employeePatch]', { id: p.id, keys: Object.keys(p.changes || {}) });
+
+  try {
+    const result = await updateState(state => {
+      const emp = state.employees[p.id];
+      if (!emp) throw new Error('Empleado no encontrado: ' + p.id);
+
+      // Conflict detection: if client supplied an updatedAt (their last-seen timestamp),
+      // and the remote entity has a newer updatedAt, block the patch to avoid silent overwrite.
+      const remoteUpdatedAt = emp.updatedAt || 0;
+      const patchUpdatedAt = p.updatedAt ? (typeof p.updatedAt === 'number' ? p.updatedAt : Date.parse(p.updatedAt) || 0) : 0;
+      if (patchUpdatedAt && remoteUpdatedAt > patchUpdatedAt) {
+        if (typeof window !== 'undefined') {
+          window.__EXTRAS_RUNTIME__.employeeConflictCount = (window.__EXTRAS_RUNTIME__.employeeConflictCount || 0) + 1;
+          window.__EXTRAS_RUNTIME__.employeeOverwritePrevented = (window.__EXTRAS_RUNTIME__.employeeOverwritePrevented || 0) + 1;
+        }
+        console.warn('[employeeConflict]', { id: p.id, remoteUpdatedAt, patchUpdatedAt });
+        const err = new Error('PATCH_CONFLICT: remote has newer changes');
+        err.code = 'PATCH_CONFLICT';
+        err.details = { id: p.id, remoteUpdatedAt, patchUpdatedAt };
+        throw err;
+      }
+
+      const before = { id: emp.id, name: emp.name, turno_base: emp.turno_base, tipo: emp.tipo, activo: emp.activo };
+      if (typeof p.changes?.name === 'string') p.changes.name = sanitizeName(p.changes.name);
+      Object.assign(emp, p.changes || {});
+      // Respect optimistic versioning if present in changes
+      applyMetadata(emp, user, p.changes?.version);
+
+      appendAuditLogEntry(state, {
+        operation: 'employee.updated',
+        entity: 'employee',
+        entityId: p.id,
+        before,
+        after: { id: emp.id, name: emp.name, turno_base: emp.turno_base, tipo: emp.tipo, activo: emp.activo },
+        origin: 'employees.patch',
+        details: { changedKeys: Object.keys(p.changes || {}), correlationId: p.correlationId || null },
+      }, user);
+
+      return emp;
+    });
+
+    return result;
+  } catch (e) {
+    // Retry telemetry: detect concurrency errors from adapters
+    const concCodes = ['FIREBASE_PATCH_CONFLICT', 'FULL_SAVE_BLOCKED', 'FIREBASE_UNSAFE_OPERATION', 'Conflicto de concurrencia'];
+    if (typeof window !== 'undefined') {
+      const isConcurrency = e && e.code && (String(e.code).toUpperCase().includes('CONCURRENC') || concCodes.includes(e.code));
+      if (isConcurrency) {
+        window.__EXTRAS_RUNTIME__.employeeRetryCount = (window.__EXTRAS_RUNTIME__.employeeRetryCount || 0) + 1;
+        console.info('[employeeRetry]', { id: (p && p.id) || null, error: e.code || e.message });
+      }
+    }
+    throw e;
+  }
+}
+
 export async function resetAllData(user) {
   await updateState(state => {
     const preservedAuditLogs = Array.isArray(state.auditLogs) ? state.auditLogs.slice() : [];
@@ -2466,7 +2561,9 @@ export {
   CRITICAL_AUDIT_EVENT_MAP,
   // MÓDULO TURNO NOCHE FASE 3C
   createNightShiftEvent, addNightShiftPerson, removeNightShiftPerson, closeNightShiftEvent, getNightShiftMonthlyStats,
-  reopenNightShiftEvent, getNightShiftAdvancedStats, cleanupOldEmptyNightEvents
+  reopenNightShiftEvent, getNightShiftAdvancedStats, cleanupOldEmptyNightEvents,
+  // New exports: granular employee patching helpers
+  normalizeEmployeePatch, patchEmployee
 };
 
 // Indicador de finalización del módulo sábado v1.2

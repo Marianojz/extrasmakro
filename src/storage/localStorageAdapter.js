@@ -8,6 +8,7 @@ import {
   mergeAuditLogsAppendOnly,
   resolveStateMutation,
   withoutLegacyStateFields,
+  safeEmployeeMerge,
 } from './adapter.js';
 import { APP_CONFIG } from '../config.js';
 import { generateEntityId, normalizeId } from '../utils_id.js';
@@ -133,11 +134,16 @@ function writeStorageItem(key, value) {
   try {
     localStorage.setItem(key, value);
   } catch (error) {
-    if (error.name === 'QuotaExceededError' || error.message.includes('quota')) {
-      alert('ALERTA: El almacenamiento local está lleno. Realizar exportación inmediata.');
+    if (error && (error.name === 'QuotaExceededError' || (error.message && error.message.toLowerCase().includes('quota')))) {
+      try { alert('ALERTA: El almacenamiento local está lleno. Realizar exportación inmediata.'); } catch (e) {}
+      const err = new Error('QUOTA_EXCEEDED: localStorage quota exceeded');
+      err.code = 'QUOTA_EXCEEDED';
+      err.original = error;
+      console.error('[LocalStorageAdapter] Quota exceeded while saving.', error);
+      throw err;
     }
     console.error('[LocalStorageAdapter] Error al guardar.', error);
-    throw new Error('ALERTA: El almacenamiento local está lleno. Realizar exportación inmediata.');
+    throw error;
   }
 }
 
@@ -461,7 +467,33 @@ function saveEmployeesList(value) {
 }
 
 function saveEmployee(id, value) {
-  saveEntity('employees', id, value);
+  const stringId = String(id);
+  const existing = readJson(ENTITY_ITEM_KEY('employees', stringId), null);
+  try {
+    const merged = safeEmployeeMerge(existing, value || {});
+    saveEntity('employees', id, merged);
+  } catch (e) {
+    if (e && e.code === 'PATCH_CONFLICT') {
+      try {
+        appendAuditLog({
+          id: `patch-conflict-${Date.now()}`,
+          ts: new Date().toISOString(),
+          timestamp: new Date().toISOString(),
+          tipo: 'PATCH_CONFLICT',
+          operation: 'employee.patch_conflict',
+          entity: 'employees',
+          entityId: stringId,
+          usuario: 'sistema',
+          userId: 'sistema',
+          origin: 'storage.local',
+          details: e.details || {},
+        });
+      } catch (inner) {
+        console.error('[AUDIT_LOG_ERROR]', inner);
+      }
+    }
+    throw e;
+  }
 }
 
 function removeEmployee(id) {
@@ -633,6 +665,34 @@ async function reset() {
   });
 }
 
+function getStorageDiagnostics() {
+  try {
+    let estimatedChars = 0;
+    let items = 0;
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k) || '';
+      estimatedChars += (k.length + v.length);
+      items += 1;
+    }
+    // Estimate bytes assuming 2 bytes per character (UTF-16 JS strings)
+    const estimatedBytes = estimatedChars * 2;
+    const quotaEstimate = (APP_CONFIG && APP_CONFIG.LOCALSTORAGE_QUOTA_BYTES) ? Number(APP_CONFIG.LOCALSTORAGE_QUOTA_BYTES) : 5 * 1024 * 1024; // 5MB default
+    const risk = quotaEstimate > 0 ? estimatedBytes / quotaEstimate : 0;
+    return {
+      estimatedBytes,
+      items,
+      quotaEstimate,
+      quotaRisk: risk,
+      quotaRiskLevel: risk > 0.9 ? 'critical' : (risk > 0.75 ? 'warning' : 'ok'),
+      degraded: risk > 0.9,
+      lastStorageFailures: null,
+    };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+}
+
 export default {
   load,
   save,
@@ -651,4 +711,5 @@ export default {
   saveNightShiftEvents,
   saveSaturdayData,
   saveWeekAvailability,
+  getStorageDiagnostics,
 };
