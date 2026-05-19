@@ -846,8 +846,21 @@ body { background: #f4f6f8; font-family: Inter, ui-sans-serif, system-ui, -apple
   /* Navigation — force bottom nav on small screens regardless of JS mode */
   .nav-tabs { display: none !important; }
   .mobile-bottom-nav { display: block !important; }
-  #app { padding-bottom: 78px; }
-  .toast-container { bottom: 78px; }
+  /* Mobile bottom nav: large touch targets and clear active state */
+  .mobile-bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 64px; background: #fff; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: center; z-index: 1200; }
+  .mobile-bottom-nav-inner { display: flex; gap: 6px; width: 100%; max-width: 640px; padding: 6px 12px; justify-content: space-around; }
+  .mob-nav-btn { background: none; border: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 10px 12px; border-radius: 10px; min-width: 64px; max-width: 120px; -webkit-tap-highlight-color: transparent; }
+  .mob-nav-btn .mob-nav-icon { font-size: 18px; }
+  .mob-nav-btn.active { color: var(--celsur-blue); background: rgba(11,95,174,0.06); }
+  .header-actions { display: flex; gap: 8px; align-items: center; }
+  .header-actions .btn { padding: 8px 10px; font-size: 13px; }
+  /* visual states */
+  .state-success { background: linear-gradient(90deg,#e6ffef,#f0fff4); color: #0b6a3a; }
+  .state-warning { background: linear-gradient(90deg,#fff8e6,#fffaf1); color: #92400e; }
+  .state-critical { background: linear-gradient(90deg,#fff1f1,#fff6f6); color: #7f1d1d; }
+  .state-degraded { background: linear-gradient(90deg,#fff7f0,#fff4f0); color: #b45309; }
+  #app { padding-bottom: 98px; }
+  .toast-container { bottom: 98px; }
 
   /* Nav */
   .nav-tab { padding: 11px 14px; font-size: 12.5px; }

@@ -229,7 +229,7 @@ function confirmModal(msg, onConfirm) {
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
 
-const TABS = ['empleados', 'semana', 'convocatorias', 'sabados', 'turno_noche', 'estadisticas', 'config'];
+const TABS = ['convocatorias','empleados','sabados','semana','turno_noche','estadisticas','dashboard','config'];
 
 function switchTab(tab) {
   for (const t of TABS) {
@@ -366,6 +366,58 @@ async function buildMobileHomeQuickActions() {
 
 // ─── Montaje principal ────────────────────────────────────────────────────────
 
+function buildTabDashboard() {
+  const sec = el('div', { id: 'tab-dashboard', class: 'tab-section' });
+  sec.appendChild(el('h2', { class: 'section-title' }, 'Dashboard Operacional'));
+  sec.appendChild(el('p', { class: 'section-desc' }, 'Visión rápida: estado runtime, KPIs operacionales y alertas críticas.'));
+
+  const kpiGrid = el('div', { class: 'stats-cards' });
+  // lightweight KPI cards (computed from models available functions)
+  const makeCard = (title, value, icon) => el('div', { class: 'stat-card' }, el('div', { class: 'stat-icon' }, icon), el('div', { class: 'stat-value' }, String(value)), el('div', { class: 'stat-label' }, title));
+
+  (async () => {
+    try {
+      const emps = await Models.listEmployees();
+      const all = Array.isArray(emps) ? emps : Object.values(emps || {});
+      const totalEmps = all.length;
+      const avMap = await Models.getWeekAvailability();
+      const available = Object.values(avMap || {}).filter(x => x && x.disponible).length;
+      const stats = await Models.getSystemStats?.() || {};
+      kpiGrid.appendChild(makeCard('Convocatorias activas', stats.convocatorias_active ?? '—', '📞'));
+      kpiGrid.appendChild(makeCard('Empleados (total)', totalEmps, '👥'));
+      kpiGrid.appendChild(makeCard('Empleados disponibles', available, '✅'));
+      kpiGrid.appendChild(makeCard('Recuperos pendientes', stats.recuperos_pending ?? '—', '🛠'));
+    } catch (e) {
+      kpiGrid.appendChild(makeCard('Error KPI', '—', '⚠️'));
+      console.error('Dashboard KPI load failed', e);
+    }
+  })();
+
+  sec.appendChild(kpiGrid);
+
+  // runtime inspector (reads window.__HX_RUNTIME__)
+  const rtCard = el('div', { class: 'card' }, el('h4', {}, 'Runtime Operational Health'), el('div', { id: 'runtime-inspector' }, 'Cargando estado runtime…'));
+  sec.appendChild(rtCard);
+
+  function renderRuntime() {
+    const rt = window.__HX_RUNTIME__ || {};
+    const root = $id('runtime-inspector');
+    if (!root) return;
+    root.innerHTML = '';
+    const rows = [];
+    rows.push(el('div', {}, el('strong', {}, 'State: '), el('span', {}, rt.state || 'unknown')));
+    rows.push(el('div', {}, el('strong', {}, 'Último sync: '), el('span', {}, rt.lastSync || '—')));
+    rows.push(el('div', {}, el('strong', {}, 'Retries: '), el('span', {}, String(rt.retries || 0))));
+    rows.push(el('div', {}, el('strong', {}, 'Conflictos recientes: '), el('span', {}, String((rt.conflicts || []).length || 0))));
+    if (rt.degraded) rows.push(el('div', { class: 'text-danger' }, '⚠️ Degraded mode activo'));
+    rows.forEach(r => root.appendChild(r));
+  }
+  renderRuntime();
+  setInterval(renderRuntime, 6000);
+
+  return sec;
+}
+
 async function mountUI() {
   const appRoot = $id('app');
 
@@ -388,6 +440,13 @@ async function mountUI() {
         )
       ),
       el('div', { id: 'shift-indicator', class: 'shift-badge' }),
+      // Quick operational actions (one-tap supervisors)
+      el('div', { class: 'header-actions' },
+        el('button', { class: 'btn btn-action', onclick: () => switchTab('convocatorias'), title: 'Convocar' }, '📞 Convocar'),
+        el('button', { class: 'btn btn-primary', onclick: () => switchTab('sabados'), title: 'Asignar sábado' }, '📅 Sábado'),
+        el('button', { class: 'btn btn-info', onclick: () => switchTab('empleados'), title: 'Buscar empleado' }, '🔎 Buscar'),
+        el('button', { class: 'btn btn-secondary', onclick: () => switchTab('dashboard'), title: 'Abrir dashboard' }, '📈 Dashboard')
+      ),
       el('button', { id: 'view-toggle-btn', class: 'view-toggle-btn', onclick: () => toggleMobileMode() }, '📱 Vista Móvil'),
         featureOn('explainMode')
           ? el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF')
@@ -415,14 +474,15 @@ async function mountUI() {
 
   // Sections
   const sections = el('div', { class: 'tab-sections' },
-    buildTabEmpleados(),
-    buildTabSemana(),
-    buildTabConvocatorias(),
-    buildTabSabados(),
+      buildTabConvocatorias(),
+      buildTabEmpleados(),
+      buildTabSabados(),
+      buildTabSemana(),
     buildTabTurnoNoche(),
     buildTabEstadisticas(),
-    buildTabConfig()
-  );
+      buildTabDashboard(),
+      buildTabConfig()
+    );
 
   const alertBar = el('div', { id: 'alert-bar', class: 'alert-bar' });
   const footer = el('footer', { class: 'app-footer' }, 'creado por M. Zequeira');
