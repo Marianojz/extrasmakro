@@ -105,11 +105,12 @@ async function load() {
 async function save(state, options = {}) {
   // options.reason MUST be provided for full-state saves when using Firebase.
   // Allowed reasons permit administrative/import/maintenance flows only.
-  const ALLOWED_REASONS = new Set(['admin_import', 'maintenance', 'restore', 'admin_export']);
+  // NOTE: require explicit 'admin_restore' for full restores to avoid accidental 'restore' usage.
+  const ALLOWED_REASONS = new Set(['admin_import', 'maintenance', 'admin_restore', 'admin_export']);
   await ensureAuth();
   if (!options || !options.reason || !ALLOWED_REASONS.has(options.reason)) {
-    console.error('[FIREBASE_UNSAFE_OPERATION] FULL_SAVE_BLOCKED - full root overwrite is prohibited in operational flows. Provide options.reason to allow (admin_import|maintenance).', { reason: options?.reason });
-    const err = new Error('FULL_SAVE_BLOCKED: full state save is prohibited for this backend without an explicit administrative reason');
+    console.error('[FIREBASE_UNSAFE_OPERATION] FULL_SAVE_BLOCKED - full root overwrite is prohibited in operational flows. Provide options.reason to allow (admin_import|admin_restore|maintenance).', { reason: options?.reason });
+    const err = new Error('FULL_SAVE_BLOCKED: full state save is prohibited for this backend without an explicit administrative reason (use reason="admin_restore" for full restores)');
     err.code = 'FULL_SAVE_BLOCKED';
     throw err;
   }
