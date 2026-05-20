@@ -6,6 +6,7 @@ import {
   resolveStateMutation,
   withoutLegacyStateFields,
 } from "./adapter.js";
+import { APP_CONFIG } from '../config.js';
 
 const {
   initializeApp,
@@ -24,16 +25,36 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 let _firebaseAnonSignIn = null;
-if (getAuth && signInAnonymously) {
-  const authInit = async () => {
+
+// auth recovery: attempt anonymous sign-in with limited retries
+async function attemptAnonSignIn(maxAttempts = 3) {
+  if (!getAuth || !signInAnonymously) return;
+  let lastErr = null;
+  for (let i = 0; i < maxAttempts; i += 1) {
     try {
       const auth = getAuth(app);
       await signInAnonymously(auth);
+      diagnostics.connectionState = 'connected';
+      diagnostics.degraded = false;
+      pushRuntimeEvent({ type: 'FIREBASE_AUTH_SUCCESS', attempt: i + 1 });
+      return;
     } catch (err) {
-      console.warn('Firebase anonymous auth failed', err);
+      lastErr = err;
+      pushRuntimeEvent({ type: 'FIREBASE_AUTH_RETRY', attempt: i + 1, msg: String(err && err.message) });
+      await new Promise(r => setTimeout(r, 200 * (i + 1)));
     }
-  };
-  _firebaseAnonSignIn = authInit();
+  }
+  diagnostics.connectionState = 'offline';
+  diagnostics.degraded = true;
+  pushRuntimeEvent({ type: 'FIREBASE_AUTH_FAILED', msg: String(lastErr && lastErr.message) });
+  // After exhausting retries, throw so callers (healthCheck, operations) can detect and handle auth failure
+  const err = lastErr || new Error('FIREBASE_AUTH_FAILED');
+  err.code = err.code || 'FIREBASE_AUTH_FAILED';
+  throw err;
+}
+
+if (getAuth && signInAnonymously) {
+  _firebaseAnonSignIn = attemptAnonSignIn();
 }
 
 async function ensureAuth() {
@@ -76,14 +97,119 @@ function normalizeState(data = {}) {
   return state;
 }
 
+// Diagnostics & retry helpers (lightweight, staging-ready)
+const diagnostics = {
+  connectionState: 'unknown',
+  lastSync: null,
+  retryCount: 0,
+  conflictCount: 0,
+  avgLatencyMs: 0,
+  _latencySamples: [],
+  degraded: false,
+  patchFailures: 0,
+  lastConflictSample: null,
+};
+
+// circuit breaker (simple)
+const circuit = {
+  state: 'closed', // closed | open | half-open
+  failureCount: 0,
+  threshold: 3,
+  openedAt: null,
+  cooldownMs: 10000,
+};
+
+function openCircuit() {
+  circuit.state = 'open';
+  circuit.openedAt = Date.now();
+  diagnostics.degraded = true;
+  pushRuntimeEvent({ type: 'CIRCUIT_OPEN', openedAt: circuit.openedAt });
+}
+
+function maybeResetCircuit() {
+  if (circuit.state === 'open' && Date.now() - (circuit.openedAt || 0) > circuit.cooldownMs) {
+    circuit.state = 'half-open';
+    pushRuntimeEvent({ type: 'CIRCUIT_HALF_OPEN' });
+  }
+}
+
+function recordLatency(ms) {
+  try {
+    diagnostics._latencySamples.push(ms);
+    if (diagnostics._latencySamples.length > 50) diagnostics._latencySamples.shift();
+    const sum = diagnostics._latencySamples.reduce((a,b) => a+b, 0);
+    diagnostics.avgLatencyMs = Math.round(sum / diagnostics._latencySamples.length);
+  } catch (e) { /* ignore */ }
+}
+
+function pushRuntimeEvent(ev) {
+  try {
+    if (!window.__HX_RUNTIME__) window.__HX_RUNTIME__ = {};
+    if (!Array.isArray(window.__HX_RUNTIME__.events)) window.__HX_RUNTIME__.events = [];
+    window.__HX_RUNTIME__.events.push(Object.assign({ ts: Date.now() }, ev));
+    // keep it short
+    if (window.__HX_RUNTIME__.events.length > 200) window.__HX_RUNTIME__.events.splice(0, window.__HX_RUNTIME__.events.length - 200);
+  } catch (e) { /* ignore */ }
+}
+
+async function retryable(fn, opts = {}) {
+  const attempts = (APP_CONFIG && Number.isFinite(Number(APP_CONFIG.MAX_CALL_ATTEMPTS))) ? Number(APP_CONFIG.MAX_CALL_ATTEMPTS) : 2;
+  let lastErr = null;
+
+  // Circuit handling
+  maybeResetCircuit();
+  if (circuit.state === 'open') {
+    const err = new Error('CIRCUIT_OPEN: operations temporarily disabled due to repeated failures');
+    err.code = 'CIRCUIT_OPEN';
+    throw err;
+  }
+
+  for (let i = 0; i < attempts; i += 1) {
+    const start = Date.now();
+    try {
+      const res = await fn();
+      const dur = Date.now() - start;
+      recordLatency(dur);
+      diagnostics.lastSync = new Date().toISOString();
+      diagnostics.connectionState = 'connected';
+
+      // success -> reset circuit
+      circuit.failureCount = 0;
+      if (circuit.state === 'half-open') circuit.state = 'closed';
+      diagnostics.degraded = false;
+      return res;
+    } catch (e) {
+      circuit.failureCount += 1;
+      diagnostics.retryCount += 1;
+      lastErr = e;
+      pushRuntimeEvent({ type: 'FIREBASE_RETRY', msg: String(e && e.message), attempt: i + 1, reason: opts.reason || 'operation' });
+
+      if (circuit.failureCount >= circuit.threshold) {
+        openCircuit();
+      }
+
+      // small backoff
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 100 * (i + 1)));
+    }
+  }
+  diagnostics.patchFailures += 1;
+  diagnostics.degraded = true;
+  pushRuntimeEvent({ type: 'FIREBASE_FAILURE', msg: String(lastErr && lastErr.message), attempts });
+  throw lastErr;
+}
+
 // Helper: perform an update at the DB root with diagnostics (patch: top-level keys)
 async function updateRootPatchWithDiagnostics(patch, domain = 'generic') {
   await ensureAuth();
-  const start = Date.now();
-  await update(ref(db, "/"), patch);
-  const durationMs = Date.now() - start;
   const patchSize = Object.keys(patch || {}).length;
-  console.info('[FIREBASE_GRANULAR_WRITE]', { domain, patchSize, durationMs, patchKeys: Object.keys(patch || {}) });
+
+  await retryable(async () => {
+    await update(ref(db, "/"), patch);
+  }, { reason: 'updateRootPatchWithDiagnostics' });
+
+  // record success latency via retryable and emit lightweight info
+  console.info('[FIREBASE_GRANULAR_WRITE]', { domain, patchSize, patchKeys: Object.keys(patch || {}) });
+  pushRuntimeEvent({ type: 'FIREBASE_GRANULAR_WRITE', domain, patchSize, keys: Object.keys(patch || {}) });
 }
 
 
@@ -175,10 +301,13 @@ async function removeCallEvent(id) {
 async function appendAuditLog(log) {
   await ensureAuth();
   const [normalizedLog] = mergeAuditLogsAppendOnly([], [log]);
-  await runTransaction(ref(db, "/auditLogs"), currentLogs => {
-    const logs = mergeAuditLogsAppendOnly(currentLogs, normalizedLog ? [normalizedLog] : []);
-    return logs;
-  }, { applyLocally: false });
+  await retryable(async () => {
+    await runTransaction(ref(db, "/auditLogs"), currentLogs => {
+      const logs = mergeAuditLogsAppendOnly(currentLogs, normalizedLog ? [normalizedLog] : []);
+      return logs;
+    }, { applyLocally: false });
+  }, { reason: 'appendAuditLog' });
+  pushRuntimeEvent({ type: 'AUDIT_APPENDED', id: normalizedLog && normalizedLog.id });
 }
 
 async function saveAuditLogs(logs) {
@@ -444,10 +573,32 @@ async function applyGranularOperations(previousState, operations, nextState) {
       const localPrevVal = previousState?.[topKey];
       const equal = JSON.stringify(remoteVal) === JSON.stringify(localPrevVal === undefined ? undefined : localPrevVal);
       if (!equal) {
-        console.error('[FIREBASE_PATCH_CONFLICT]', { topKey, remoteValPreview: Array.isArray(remoteVal) ? remoteVal.length : (remoteVal && typeof remoteVal === 'object' ? Object.keys(remoteVal).slice(0,5) : remoteVal), note: 'remote differs from previousState - potential concurrent modification or stale client' });
+        diagnostics.conflictCount += 1;
+        // Build a shallow diff between remote and previous local value for visibility
+        function shallowDiff(a, b) {
+          const diff = { added: [], removed: [], changed: {} };
+          const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+          if (isObj(a) && isObj(b)) {
+            const aKeys = Object.keys(a);
+            const bKeys = Object.keys(b);
+            for (const k of aKeys) if (!bKeys.includes(k)) diff.removed.push(k);
+            for (const k of bKeys) if (!aKeys.includes(k)) diff.added.push(k);
+            for (const k of aKeys) if (bKeys.includes(k) && JSON.stringify(a[k]) !== JSON.stringify(b[k])) diff.changed[k] = { remote: a[k], local: b[k] };
+          } else if (Array.isArray(a) && Array.isArray(b)) {
+            if (JSON.stringify(a) !== JSON.stringify(b)) diff.changed = { remote: a, local: b };
+          } else {
+            if (JSON.stringify(a) !== JSON.stringify(b)) diff.changed = { remote: a, local: b };
+          }
+          return diff;
+        }
+
+        const diff = shallowDiff(remoteVal, localPrevVal);
+        diagnostics.lastConflictSample = { topKey, diff, ts: new Date().toISOString() };
+        console.error('[FIREBASE_PATCH_CONFLICT]', { topKey, remoteValPreview: Array.isArray(remoteVal) ? remoteVal.length : (remoteVal && typeof remoteVal === 'object' ? Object.keys(remoteVal).slice(0,5) : remoteVal), note: 'remote differs from previousState - potential concurrent modification or stale client', diffSummary: diff });
+        pushRuntimeEvent({ type: 'FIREBASE_PATCH_CONFLICT', topKey, note: 'remote differs from previousState', diff });
         const err = new Error('FIREBASE_PATCH_CONFLICT: remote changed since load');
         err.code = 'FIREBASE_PATCH_CONFLICT';
-        err.details = { topKey };
+        err.details = { topKey, diff };
         throw err;
       }
     }
@@ -513,12 +664,56 @@ async function updateState(mutator) {
   return result;
 }
 
+// Diagnostics accessor and small helpers
+function getFirebaseDiagnostics() {
+  return {
+    connectionState: diagnostics.connectionState,
+    lastSync: diagnostics.lastSync,
+    retryCount: diagnostics.retryCount,
+    conflictCount: diagnostics.conflictCount,
+    avgLatencyMs: diagnostics.avgLatencyMs,
+    degraded: diagnostics.degraded,
+    patchFailures: diagnostics.patchFailures,
+  };
+}
+
+// Alias to preserve adapter contract: patch(path, data)
+async function patch(path, data) {
+  return await updateData(path, data);
+}
+
+// Expose appendAudit for adapter contract compatibility
+async function appendAudit(log) {
+  return await appendAuditLog(log);
+}
+
+// healthCheck: lightweight connectivity probe
+async function healthCheck(timeoutMs = 3000) {
+  try {
+    await ensureAuth();
+    const p = retryable(async () => { return await get(ref(db, '/')); }, { reason: 'healthCheck' });
+    const res = await Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('HEALTHCHECK_TIMEOUT')), timeoutMs))]);
+    diagnostics.connectionState = res && res.exists() ? 'connected' : 'connected';
+    diagnostics.degraded = false;
+    return { ok: true, exists: typeof res?.exists === 'function' ? res.exists() : !!res };
+  } catch (e) {
+    diagnostics.connectionState = 'offline';
+    diagnostics.degraded = true;
+    pushRuntimeEvent({ type: 'FIREBASE_HEALTH_FAIL', msg: String(e && e.message) });
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Integrate with runtime hook
+try { if (!window.__HX_RUNTIME__) window.__HX_RUNTIME__ = {}; window.__HX_RUNTIME__.getFirebaseDiagnostics = getFirebaseDiagnostics; window.__HX_RUNTIME__.firebaseDiagnostics = getFirebaseDiagnostics(); } catch (e) { /* ignore in non-browser env */ }
+
 export default {
   load,
   save,
   reset,
   updateData,
   removeData,
+  patch,
   update: updateState,
   saveSchemaMeta,
   saveSystemConfig,
@@ -527,10 +722,13 @@ export default {
   removeEmployee,
   saveCallEvent,
   removeCallEvent,
+  appendAudit,
   appendAuditLog,
   saveAuditLogs,
   saveSaturdayEvents,
   saveNightShiftEvents,
   saveSaturdayData,
   saveWeekAvailability,
+  healthCheck,
+  getFirebaseDiagnostics,
 };
