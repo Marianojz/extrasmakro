@@ -8,21 +8,24 @@ import {
 } from "./adapter.js";
 import { APP_CONFIG } from '../config.js';
 
-const {
-  initializeApp,
-  getDatabase,
-  ref,
-  set,
-  get,
-  runTransaction,
-  update,
-  remove,
-  getAuth,
-  signInAnonymously
-} = window.firebaseModules;
+let initializeApp, getDatabase, ref, set, get, runTransaction, update, remove, getAuth, signInAnonymously;
+let app = null;
+let db = null;
+let _firebaseAnonSignIn = null;
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+// Initialize firebase only when explicitly configured to use 'firebase' backend
+if (typeof window !== 'undefined' && APP_CONFIG && APP_CONFIG.STORAGE_BACKEND === 'firebase' && window.firebaseModules) {
+  ({ initializeApp, getDatabase, ref, set, get, runTransaction, update, remove, getAuth, signInAnonymously } = window.firebaseModules);
+  try {
+    if (initializeApp && getDatabase) {
+      app = initializeApp(firebaseConfig);
+      db = getDatabase(app);
+    }
+  } catch (e) {
+    pushRuntimeEvent({ type: 'FIREBASE_INIT_ERROR', msg: String(e && e.message) });
+  }
+}
+
 
 let _firebaseAnonSignIn = null;
 
@@ -53,7 +56,8 @@ async function attemptAnonSignIn(maxAttempts = 3) {
   throw err;
 }
 
-if (getAuth && signInAnonymously) {
+// Anonymous sign-in is started only if the adapter was initialized and auth functions are available.
+if (typeof window !== 'undefined' && APP_CONFIG && APP_CONFIG.STORAGE_BACKEND === 'firebase' && getAuth && signInAnonymously) {
   _firebaseAnonSignIn = attemptAnonSignIn();
 }
 
