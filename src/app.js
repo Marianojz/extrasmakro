@@ -14,6 +14,7 @@
 import api from './api/apiLayer.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
 import { isFeatureEnabled } from './config/features.js';
+import './runtime.js';
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
 import './debug-panel.js';

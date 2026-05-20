@@ -5,7 +5,7 @@ import { APP_CONFIG } from '../config.js';
 const API_EVENT_NAME = 'extrasmakro:api';
 const DEFAULT_LOCK_KEY = 'mutation';
 const DEFAULT_RETRY_COUNT = 1; // legacy default
-const MAX_RETRY = 2; // enforced operational max retry (2 retries)
+const MAX_RETRY = 1; // enforced operational max retry (max 1 retry)
 const BACKOFF_BASE_MS = 250;
 const BACKOFF_JITTER_MIN = 50;
 const BACKOFF_JITTER_MAX = 150;
@@ -568,11 +568,21 @@ function initRuntimeTelemetry() {
   if (typeof window === 'undefined') return;
   if (!window.__HX_RUNTIME__) {
     window.__HX_RUNTIME__ = {
+      // operation counters and history
       operationsCount: 0,
       successCount: 0,
       failedCount: 0,
       retriesCount: 0,
+      retriesCountTotal: 0,
       conflictsCount: 0,
+      retryCount: 0,
+      conflictCount: 0,
+      degradedEvents: [],
+      operationHistory: [],
+      // storage / firebase health (lightweight)
+      storage: { adapters: {}, status: 'unknown' },
+      firebaseHealth: { degraded: false, lastChecked: null, details: null },
+      // latency and errors
       avgLatencyMs: 0,
       lastErrors: [], // capped list
       degradedMode: false,
@@ -586,11 +596,38 @@ function initRuntimeTelemetry() {
 function updateRuntimeTelemetry(opMeta, outcome, extra = {}) {
   if (typeof window === 'undefined' || !window.__HX_RUNTIME__) return;
   const rt = window.__HX_RUNTIME__;
-  if (outcome === 'started') rt.operationsCount = (rt.operationsCount || 0) + 1;
-  if (outcome === 'success') rt.successCount = (rt.successCount || 0) + 1;
-  if (outcome === 'failed') rt.failedCount = (rt.failedCount || 0) + 1;
-  if (extra && extra.retryOccurred) rt.retriesCount = (rt.retriesCount || 0) + 1;
+  // operation lifecycle counts and compact history
+  if (outcome === 'started') {
+    rt.operationsCount = (rt.operationsCount || 0) + 1;
+    rt.operationHistory = rt.operationHistory || [];
+    rt.operationHistory.push({ ts: new Date().toISOString(), op: (opMeta && opMeta.operationType) || null, status: 'started' });
+    if (rt.operationHistory.length > 200) rt.operationHistory.shift();
+  }
+  if (outcome === 'success') {
+    rt.successCount = (rt.successCount || 0) + 1;
+    rt.operationHistory = rt.operationHistory || [];
+    rt.operationHistory.push({ ts: new Date().toISOString(), op: opMeta && opMeta.operationType, status: 'success', duration: telemetry.OPERATION_DURATIONS_MS.slice(-1)[0] || 0 });
+  }
+  if (outcome === 'failed') {
+    rt.failedCount = (rt.failedCount || 0) + 1;
+    rt.operationHistory = rt.operationHistory || [];
+    rt.operationHistory.push({ ts: new Date().toISOString(), op: opMeta && opMeta.operationType, status: 'failed' });
+  }
+
+  if (extra && extra.retryOccurred) {
+    rt.retriesCount = (rt.retriesCount || 0) + 1;
+    rt.retryCount = (rt.retryCount || 0) + 1;
+  }
+
   rt.conflictsCount = telemetry.PATCH_CONFLICT_COUNT || 0;
+  rt.conflictCount = telemetry.PATCH_CONFLICT_COUNT || 0;
+
+  if (extra && extra.degraded) {
+    rt.degradedEvents = rt.degradedEvents || [];
+    rt.degradedEvents.push({ ts: new Date().toISOString(), reason: extra.degraded });
+    if (rt.degradedEvents.length > 50) rt.degradedEvents.shift();
+  }
+
   const durations = telemetry.OPERATION_DURATIONS_MS || [];
   rt.avgLatencyMs = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
   rt.lastOperation = (opMeta && opMeta.operationType) || rt.lastOperation;
@@ -743,6 +780,47 @@ function wrapOperation(operation) {
   return async (...args) => await safeExecuteOperation(operation, args);
 }
 
+// Backwards-compatible alias required by operational spec: executeOperationalAction
+function executeOperationalAction(operation, args) {
+  return safeExecuteOperation(operation, args);
+}
+
+function markDegraded(reason) {
+  try {
+    if (typeof window === 'undefined' || !window.__HX_RUNTIME__) return;
+    window.__HX_RUNTIME__.degradedMode = true;
+    window.__HX_RUNTIME__.degradedEvents = window.__HX_RUNTIME__.degradedEvents || [];
+    window.__HX_RUNTIME__.degradedEvents.push({ ts: new Date().toISOString(), reason });
+    if (window.__HX_RUNTIME__.degradedEvents.length > 100) window.__HX_RUNTIME__.degradedEvents.shift();
+    publishObservation('DEGRADED', { reason }, { message: reason });
+  } catch (e) { /* best-effort */ }
+}
+
+function recoverFromDegraded(reason) {
+  try {
+    if (typeof window === 'undefined' || !window.__HX_RUNTIME__) return;
+    window.__HX_RUNTIME__.degradedMode = false;
+    window.__HX_RUNTIME__.degradedEvents = window.__HX_RUNTIME__.degradedEvents || [];
+    window.__HX_RUNTIME__.degradedEvents.push({ ts: new Date().toISOString(), recovery: true, reason });
+    publishObservation('RECOVERY', { reason }, { message: reason });
+  } catch (e) { /* best-effort */ }
+}
+
+function getRetryStats() {
+  const rt = (typeof window !== 'undefined' && window.__HX_RUNTIME__) ? window.__HX_RUNTIME__ : {};
+  return { retriesCount: rt.retriesCount || 0, retryCount: rt.retryCount || 0 };
+}
+
+function getConflictStats() {
+  const rt = (typeof window !== 'undefined' && window.__HX_RUNTIME__) ? window.__HX_RUNTIME__ : {};
+  return { conflictsCount: rt.conflictsCount || telemetry.PATCH_CONFLICT_COUNT || 0 };
+}
+
+function getDegradedStatus() {
+  const rt = (typeof window !== 'undefined' && window.__HX_RUNTIME__) ? window.__HX_RUNTIME__ : {};
+  return { degradedMode: !!rt.degradedMode, degradedEvents: rt.degradedEvents || [], lastDegradedAt: (rt.degradedEvents && rt.degradedEvents.length ? rt.degradedEvents.slice(-1)[0].ts : null) };
+}
+
 function buildNamespace(namespaceDefinition) {
   const entries = Object.entries(namespaceDefinition).map(([name, value]) => {
     if (!value || typeof value !== 'object' || !('target' in value)) {
@@ -785,6 +863,12 @@ const api = Object.freeze({
     exportTelemetryJSON,
     generateOperationalHealthSummary,
     getRuntimeHealth,
+    getRetryStats,
+    getConflictStats,
+    getDegradedStatus,
+    executeOperationalAction,
+    markDegraded,
+    recoverFromDegraded,
     DEFAULT_RETRY_COUNT,
   }),
 });
