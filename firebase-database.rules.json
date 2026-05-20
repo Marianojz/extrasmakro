@@ -1,0 +1,75 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    "employees": {
+      "$empId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (
+            auth.token.role === 'JEFE' || 
+            (auth.token.role === 'SUPERVISOR' && data.exists() && newData.exists() && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() > data.child('updatedAt').val())
+          )",
+        ".validate": "newData.hasChildren(['id','updatedAt']) && newData.child('id').isString() && newData.child('id').val() === $empId && newData.child('updatedAt').isNumber()"
+      }
+    },
+    "convocatorias": {
+      "$convId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.token.role === 'JEFE' || auth.token.role === 'SUPERVISOR')",
+        ".validate": "newData.hasChildren(['id','createdAt']) && newData.child('id').isString() && newData.child('createdAt').isNumber()"
+      }
+    },
+    "reputacion": {
+      "$rid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role === 'JEFE'",
+        ".validate": "newData.hasChildren(['employeeId','score','updatedAt']) && newData.child('employeeId').isString() && newData.child('score').isNumber()"
+      }
+    },
+    "ranking": {
+      "$rid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role === 'JEFE'",
+        ".validate": "newData.hasChildren(['period','entries','generatedAt']) && newData.child('generatedAt').isNumber()"
+      }
+    },
+    "auditLogs": {
+      "$logId": {
+        ".read": "auth != null && (auth.token.role === 'JEFE' || auth.token.role === 'SUPERVISOR')",
+        ".write": "auth != null && !data.exists() && newData.exists() && 
+          newData.hasChildren(['correlationId','timestamp','entityType','operation']) && 
+          newData.child('correlationId').isString() && 
+          newData.child('timestamp').isNumber() && 
+          newData.child('entityType').isString() && 
+          newData.child('operation').isString()",
+        ".validate": "newData.child('timestamp').isNumber() && newData.child('timestamp').val() > 0"
+      }
+    },
+    "recoveryHistory": {
+      "$recId": {
+        ".read": "auth != null && (auth.token.role === 'JEFE')",
+        ".write": "auth != null && (
+            auth.token.role === 'JEFE' && (!data.exists()) && newData.exists() && newData.hasChildren(['correlationId','fingerprint','createdAt'])
+          )",
+        ".validate": "newData.child('createdAt').isNumber() && newData.child('correlationId').isString()"
+      }
+    },
+    "imports": {
+      "$impId": {
+        ".read": "auth != null && auth.token.role === 'JEFE'",
+        ".write": "auth != null && auth.token.role === 'JEFE' && (!data.exists()) && newData.exists() && newData.hasChildren(['schemaVersion','createdAt','author'])",
+        ".validate": "newData.child('schemaVersion').isString() && newData.child('createdAt').isNumber()"
+      }
+    },
+    "runtimeDiagnostics": {
+      "$diagId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.role === 'JEFE'",
+        ".validate": "newData.child('ts').isNumber()"
+      }
+    },
+    // default deny for other top-level nodes to avoid accidental writes
+    "$other": {
+      ".write": "false"
+    }
+  }
+}

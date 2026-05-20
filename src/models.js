@@ -9,7 +9,7 @@
 import store from './store.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE } from './config.js';
 import { isFeatureEnabled } from './config/features.js';
-import { INITIAL_STATE, resolveStateMutation, skipStateWrite, withoutLegacyStateFields } from './storage/adapter.js';
+import { INITIAL_STATE, resolveStateMutation, skipStateWrite, withoutLegacyStateFields, replaceState, mergeAuditLogsAppendOnly, getAppendedAuditLogs, safeEmployeeMerge } from './storage/adapter.js';
 import { debugLog, generateId } from './utils.js';
 import { normalizeId, generateEntityId } from './utils_id.js';
 
@@ -24,6 +24,50 @@ if (typeof window !== 'undefined') {
 
 function now() {
   return new Date().toISOString();
+}
+
+// Compute SHA-256 hex prefix when available, fallback to deterministic integer hash
+async function hashSha256Hex(str) {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle && typeof crypto.subtle.digest === 'function') {
+      const enc = new TextEncoder();
+      const data = enc.encode(str);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return 'sha256-' + hex;
+    }
+  } catch (e) {
+    // ignore and fallback
+  }
+  // Node.js fallback when require available
+  try {
+    if (typeof require === 'function') {
+      const { createHash } = require('crypto');
+      const hex = createHash('sha256').update(str, 'utf8').digest('hex');
+      return 'sha256-' + hex;
+    }
+  } catch (e) {
+    // ignore
+  }
+  // Deterministic integer fallback (legacy)
+  let h = 0; for (let i = 0; i < str.length; i++) { h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; }
+  return 'fp-' + Math.abs(h);
+}
+
+async function computeRecoveryFingerprint(state, month) {
+  const employees = state.employees || {};
+  const empIds = Object.keys(employees).sort();
+  let repSum = 0;
+  let incidentCount = 0;
+  const prefix = month + '-';
+  for (const id of empIds) {
+    const e = employees[id];
+    repSum += Number(e?.reputation || 0);
+    incidentCount += (Array.isArray(e?.incidents) ? e.incidents.filter(i => String(i.ts || '').startsWith(prefix)).length : 0);
+  }
+  const s = JSON.stringify({ empCount: empIds.length, repSum, incidentCount, ids: empIds });
+  return await hashSha256Hex(s);
 }
 
 export function initializeStorageBackend() {
@@ -119,6 +163,8 @@ function appendAuditLogEntry(state, {
   tipo = null,
   ...extraFields
 }, user) {
+  // If no user provided, try to resolve from global session to preserve auditability
+  if (!user && typeof window !== 'undefined' && window.__HX_SESSION__) user = window.__HX_SESSION__;
   const actor = resolveAuditUser(user);
   const auditTs = now();
 
@@ -201,6 +247,86 @@ function pushAudit(state, payload) {
       version: rest.version || 1,
       appendOnly: rest.appendOnly === undefined ? true : !!rest.appendOnly,
     });
+}
+
+/**
+ * Create a standardized audit entry according to operational schema
+ * { id, correlationId, type, entityType, entityId, timestamp, operation, status, metadata }
+ */
+function createAuditEntry({ id = null, correlationId = null, type = null, entityType = null, entityId = null, timestamp = null, operation = null, status = null, metadata = null, origin = 'models.createAuditEntry' } = {}) {
+  const ts = timestamp || now();
+  return {
+    id: id || generateEntityId(),
+    correlationId: correlationId || null,
+    tipo: type || operation || 'audit.event',
+    operation: operation || type || null,
+    entity: entityType || null,
+    entityId: entityId || null,
+    ts,
+    timestamp: ts,
+    createdAt: ts,
+    status: status || 'unknown',
+    metadata: metadata || {},
+    origin,
+    version: 1,
+    appendOnly: true,
+  };
+}
+
+/**
+ * Append a normalized audit event in an atomic update. Returns the newly appended entry.
+ */
+async function appendAuditEvent(entry, user) {
+  const normalized = createAuditEntry(entry || {});
+  return await updateState(state => {
+    pushAudit(state, normalized);
+    // Do not mutate existing audit history; pushAudit enforces id and timestamps
+    return normalized;
+  });
+}
+
+/**
+ * Validate an import payload for structural correctness and basic corruption patterns.
+ * Returns { valid: boolean, errors: string[], warnings: string[] }
+ */
+function validateImportPayload(data) {
+  const errors = [];
+  const warnings = [];
+  if (!data || typeof data !== 'object') {
+    errors.push('payload must be an object');
+    return { valid: false, errors, warnings };
+  }
+
+  if ('employees' in data && data.employees !== null && typeof data.employees !== 'object') {
+    errors.push('employees must be an object map');
+  }
+
+  if ('auditLogs' in data && !Array.isArray(data.auditLogs)) {
+    errors.push('auditLogs must be an array when provided');
+  }
+
+  // Detect suspicious large arrays
+  if (Array.isArray(data.auditLogs) && data.auditLogs.length > 10000) {
+    warnings.push('auditLogs unusually large (>10000 entries) — consider chunked import');
+  }
+
+  // Basic employee corruption detection
+  if (data.employees && typeof data.employees === 'object') {
+    for (const [k, v] of Object.entries(data.employees)) {
+      if (!v || typeof v !== 'object') {
+        errors.push(`employee ${k} must be an object`);
+        continue;
+      }
+      if (!v.name && !v.id) {
+        warnings.push(`employee ${k} missing name and id`);
+      }
+      if (v.id !== undefined && (v.id === null || String(v.id).trim() === '')) {
+        errors.push(`employee ${k} has invalid id`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 /**
@@ -854,10 +980,26 @@ async function importState(data) {
   // Load current state for validations
   const current = await store.load();
 
-  // Basic structural validation
-  if (!data || typeof data !== 'object') {
-    const err = new Error('IMPORT_VALIDATION_FAILED: payload must be an object');
+  // Basic structural validation using centralized helper
+  const validation = validateImportPayload(data);
+  if (!validation.valid) {
+    try {
+      await updateState(state => {
+        appendAuditLogEntry(state, {
+          operation: 'import.invalid_payload',
+          entity: 'system',
+          entityId: 'root',
+          origin: 'import.json',
+          details: { errors: validation.errors, warnings: validation.warnings },
+        });
+        return skipStateWrite();
+      });
+    } catch (e) {
+      console.warn('[IMPORT_VALIDATION_AUDIT_FAILED]', e && e.message);
+    }
+    const err = new Error('IMPORT_VALIDATION_FAILED: payload did not pass schema validation');
     err.code = 'IMPORT_VALIDATION_FAILED';
+    err.details = validation;
     throw err;
   }
 
@@ -1102,6 +1244,192 @@ async function importState(data) {
 
   // Return the summary to caller
   return summary;
+}
+
+/**
+ * Simulate a safe import merge and return the proposed nextState and summary without writing.
+ * Useful for previewing imports and preflight checks.
+ * @param {object} data import payload
+ * @returns {Promise<{nextState: object, summary: object}>}
+ */
+async function safeImportMergePreview(data) {
+  // Load current state for validations and operate on a deep clone
+  const current = await store.load();
+
+  const validation = validateImportPayload(data);
+  if (!validation.valid) {
+    const err = new Error('IMPORT_VALIDATION_FAILED: payload did not pass schema validation');
+    err.code = 'IMPORT_VALIDATION_FAILED';
+    err.details = validation;
+    throw err;
+  }
+
+  const incomingSchema = ('schemaVersion' in data) ? data.schemaVersion : 1;
+
+  // Detect destructive intent (same rules as importState)
+  const destructiveReasons = [];
+  const currEmployees = new Set(Object.keys(current.employees || {}));
+  const incomingEmployees = new Set(Object.keys(data.employees || {}));
+  for (const id of currEmployees) { if (!incomingEmployees.has(id)) destructiveReasons.push({ type: 'employee_deleted', id }); }
+
+  const currCallEvents = new Set(Object.keys(current.callEvents || {}));
+  const incomingCallEvents = new Set(Object.keys(data.callEvents || {}));
+  for (const id of currCallEvents) { if (!incomingCallEvents.has(id)) destructiveReasons.push({ type: 'callEvent_deleted', id }); }
+
+  const currSat = new Set(Object.keys(current.saturdayEvents || {}));
+  const incomingSat = new Set(Object.keys(data.saturdayEvents || {}));
+  for (const id of currSat) { if (!incomingSat.has(id)) destructiveReasons.push({ type: 'saturdayEvent_deleted', id }); }
+
+  const currNight = new Set(Object.keys(current.nightShiftEvents || {}));
+  const incomingNight = new Set(Object.keys(data.nightShiftEvents || {}));
+  for (const id of currNight) { if (!incomingNight.has(id)) destructiveReasons.push({ type: 'nightShiftEvent_deleted', id }); }
+
+  if (Array.isArray(data.auditLogs)) {
+    const currAudit = Array.isArray(current.auditLogs) ? current.auditLogs : [];
+    if (data.auditLogs.length < currAudit.length) {
+      destructiveReasons.push({ type: 'audit_truncation', prevLen: currAudit.length, nextLen: data.auditLogs.length });
+    } else {
+      const min = Math.min(currAudit.length, data.auditLogs.length);
+      for (let i = 0; i < min; i += 1) {
+        if (!valuesEqual(currAudit[i], data.auditLogs[i])) {
+          destructiveReasons.push({ type: 'audit_history_replaced', index: i });
+          break;
+        }
+      }
+    }
+  }
+
+  if (destructiveReasons.length > 0) {
+    const err = new Error('IMPORT_DESTRUCTIVE_BLOCKED: incoming payload would remove or replace existing data');
+    err.code = 'IMPORT_DESTRUCTIVE_BLOCKED';
+    err.details = destructiveReasons;
+    throw err;
+  }
+
+  const importedAuditLogs = Array.isArray(data.auditLogs) ? data.auditLogs.slice() : [];
+  const importedAuditLogsIgnored = importedAuditLogs.length;
+  const resultSummary = {
+    added: { employees: 0, callEvents: 0, saturdayEvents: 0, nightShiftEvents: 0 },
+    ignored: { auditLogs: importedAuditLogsIgnored },
+    conflicts: [],
+    auditAppended: 0,
+    warnings: [],
+  };
+
+  // Work on a deep clone to avoid mutating live storage
+  const draft = structuredClone(current || {});
+  draft.employees = draft.employees || {};
+  draft.employeesList = Array.isArray(draft.employeesList) ? draft.employeesList : Object.keys(draft.employees);
+
+  // Merge employees
+  const incomingEmps = data.employees || {};
+  for (const [rawId, inc] of Object.entries(incomingEmps)) {
+    const id = String(rawId);
+    const incClone = structuredClone(inc || {});
+    ensureEntityId(incClone, 'emp', id);
+    if (!(id in draft.employees)) {
+      draft.employees[id] = incClone;
+      if (!draft.employeesList.includes(id)) draft.employeesList.push(id);
+      resultSummary.added.employees += 1;
+    } else {
+      if (!valuesEqual(draft.employees[id], incClone)) {
+        resultSummary.conflicts.push({ type: 'employee', id });
+        resultSummary.warnings.push('Employee conflict: ' + id);
+      }
+    }
+  }
+
+  // Merge callEvents
+  draft.callEvents = draft.callEvents || {};
+  const incomingCalls = data.callEvents || {};
+  for (const [rawId, inc] of Object.entries(incomingCalls)) {
+    const id = String(rawId);
+    const incClone = structuredClone(inc || {});
+    ensureEntityId(incClone, 'call', id);
+    if (!(id in draft.callEvents)) {
+      draft.callEvents[id] = incClone;
+      resultSummary.added.callEvents += 1;
+    } else if (!valuesEqual(draft.callEvents[id], incClone)) {
+      resultSummary.conflicts.push({ type: 'callEvent', id });
+      resultSummary.warnings.push('CallEvent conflict: ' + id);
+    }
+  }
+
+  // Merge saturdayEvents
+  draft.saturdayEvents = draft.saturdayEvents || {};
+  const incomingSatEvents = data.saturdayEvents || {};
+  for (const [rawId, inc] of Object.entries(incomingSatEvents)) {
+    const id = String(rawId);
+    const incClone = structuredClone(inc || {});
+    ensureEntityId(incClone, 'sat', id);
+    if (!incClone.date) incClone.date = id;
+    if (!(id in draft.saturdayEvents)) {
+      draft.saturdayEvents[id] = incClone;
+      resultSummary.added.saturdayEvents += 1;
+    } else if (!valuesEqual(draft.saturdayEvents[id], incClone)) {
+      resultSummary.conflicts.push({ type: 'saturdayEvent', id });
+      resultSummary.warnings.push('SaturdayEvent conflict: ' + id);
+    }
+  }
+
+  // Merge nightShiftEvents
+  draft.nightShiftEvents = draft.nightShiftEvents || {};
+  const incomingNightEv = data.nightShiftEvents || {};
+  for (const [rawId, inc] of Object.entries(incomingNightEv)) {
+    const id = String(rawId);
+    const incClone = structuredClone(inc || {});
+    ensureEntityId(incClone, 'night', id);
+    if (!(id in draft.nightShiftEvents)) {
+      draft.nightShiftEvents[id] = incClone;
+      resultSummary.added.nightShiftEvents += 1;
+    } else if (!valuesEqual(draft.nightShiftEvents[id], incClone)) {
+      resultSummary.conflicts.push({ type: 'nightShiftEvent', id });
+      resultSummary.warnings.push('NightShiftEvent conflict: ' + id);
+    }
+  }
+
+  // Merge saturdayData shallowly
+  if (data.saturdayData && typeof data.saturdayData === 'object') {
+    draft.saturdayData = draft.saturdayData || structuredClone(INITIAL_STATE.saturdayData);
+    draft.saturdayData = {
+      ...draft.saturdayData,
+      ...(data.saturdayData ?? {}),
+      employees: { ...(draft.saturdayData?.employees ?? {}), ...(data.saturdayData?.employees ?? {}) },
+      events: Array.isArray(data.saturdayData?.events) ? Array.from(new Set([...(draft.saturdayData?.events || []), ...data.saturdayData.events])) : (draft.saturdayData.events || []),
+      config: { ...draft.saturdayData.config, ...(data.saturdayData?.config ?? {}) },
+    };
+  }
+
+  // Merge weekAvailability shallowly
+  if (data.weekAvailability && typeof data.weekAvailability === 'object') {
+    draft.weekAvailability = { ...(draft.weekAvailability || {}), ...(data.weekAvailability || {}) };
+  }
+
+  // Append audit logs safely
+  const appended = getAppendedAuditLogs(draft.auditLogs || [], importedAuditLogs || []);
+  if (Array.isArray(appended) && appended.length > 0) {
+    draft.auditLogs = mergeAuditLogsAppendOnly(draft.auditLogs || [], appended);
+    resultSummary.auditAppended = appended.length;
+  }
+
+  // Merge systemConfig
+  if (data.systemConfig && typeof data.systemConfig === 'object') {
+    draft.systemConfig = { ...(draft.systemConfig || {}), ...(data.systemConfig || {}) };
+  }
+
+  // Build employeesList as union preserving current order
+  const unionEmpIds = Array.from(new Set([...(draft.employeesList || []), ...Object.keys(draft.employees || {})]));
+  draft.employeesList = unionEmpIds;
+
+  // Final simulated audit entry describing the import summary
+  const importTs = now();
+  const auditEntry = createAuditEntry({ type: 'state.imported', timestamp: importTs });
+  auditEntry.origin = 'import.json';
+  auditEntry.details = { summary: resultSummary, incomingSchema: incomingSchema ?? null };
+  draft.auditLogs = draft.auditLogs || [];
+  draft.auditLogs.push(auditEntry);
+
+  return { nextState: withoutLegacyStateFields(draft), summary: resultSummary };
 }
 
 // ─── Sábados: intenciones y asignaciones individuales ─────────────────────────
@@ -1767,10 +2095,30 @@ async function applyMonthlyRecovery(yearMonth, user) {
   if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
     throw new Error('yearMonth debe ser "YYYY-MM". Ejemplo: "2026-02".');
   }
+
+  // Compute fingerprint (using SHA-256 where available)
+  const currentStateForFp = await store.load();
+  const fingerprint = await computeRecoveryFingerprint(currentStateForFp, yearMonth);
+
   return await updateState(state => {
-    if (state.systemConfig.lastRecoveryMonth === yearMonth) {
-      throw new Error('La recuperación mensual ya fue aplicada.');
+    state.systemConfig = state.systemConfig || {};
+    if (!state.systemConfig.monthlyRecoveryHistory) state.systemConfig.monthlyRecoveryHistory = [];
+    // fingerprint captured from outer scope
+
+    // If already applied with same fingerprint, idempotent: return 0
+    const existing = (state.systemConfig.monthlyRecoveryHistory || []).find(h => h.month === yearMonth && h.fingerprint === fingerprint);
+    if (existing) {
+      return 0;
     }
+
+    // If there is an entry for month but different fingerprint, block to avoid conflicting double-apply
+    const other = (state.systemConfig.monthlyRecoveryHistory || []).find(h => h.month === yearMonth && h.fingerprint !== fingerprint);
+    if (other) {
+      const err = new Error('La recuperación mensual ya fue aplicada anteriormente con una huella distinta.');
+      err.code = 'MONTHLY_RECOVERY_CONFLICT';
+      throw err;
+    }
+
     const previousRecoveryMonth = state.systemConfig.lastRecoveryMonth || null;
 
     const prefix = yearMonth + '-';
@@ -1779,7 +2127,7 @@ async function applyMonthlyRecovery(yearMonth, user) {
       const emp = state.employees[id];
       if (!emp || !emp.activo) continue;
       const hadPenalty = emp.incidents.some(
-        inc => inc.ts.startsWith(prefix) && inc.delta < 0
+        inc => inc.ts && String(inc.ts).startsWith(prefix) && inc.delta < 0
       );
       if (!hadPenalty) {
         applyPositiveReputation(emp, APP_CONFIG.REPUTATION_RECOVERY.mes_sin_incidentes);
@@ -1789,12 +2137,22 @@ async function applyMonthlyRecovery(yearMonth, user) {
 
     state.systemConfig.lastRecoveryMonth = yearMonth;
 
+    const record = {
+      month: yearMonth,
+      fingerprint,
+      appliedAt: now(),
+      actor: user?.id || 'sistema',
+      count
+    };
+    state.systemConfig.monthlyRecoveryHistory.push(record);
+
     const log = {
       ts: now(),
       tipo: 'monthly_recovery',
       fecha: yearMonth,
-      ejecutor: 'sistema',
-      cantidad_empleados_beneficiados: count
+      ejecutor: user?.id || 'sistema',
+      cantidad_empleados_beneficiados: count,
+      fingerprint,
     };
     applyMetadata(state.systemConfig, user);
     appendAuditLogEntry(state, {
@@ -1802,7 +2160,7 @@ async function applyMonthlyRecovery(yearMonth, user) {
       entity: 'systemConfig',
       entityId: yearMonth,
       before: { lastRecoveryMonth: previousRecoveryMonth },
-      after: { lastRecoveryMonth: yearMonth, cantidad_empleados_beneficiados: count },
+      after: { lastRecoveryMonth: yearMonth, cantidad_empleados_beneficiados: count, fingerprint },
       origin: 'config.monthly_recovery',
       ...log,
     }, user);
@@ -2533,6 +2891,32 @@ export async function resetAllData(user) {
   });
 }
 
+// Runtime diagnostics helpers
+async function getAuditDiagnostics() {
+  const state = await store.load();
+  const audit = Array.isArray(state.auditLogs) ? state.auditLogs : [];
+  const last = audit.length ? audit[audit.length - 1] : null;
+  return {
+    auditCount: audit.length,
+    lastAuditTs: last ? last.ts : null,
+    lastAuditId: last ? last.id : null,
+    lastRecoveryMonth: state.systemConfig?.lastRecoveryMonth || null,
+    preservedAuditPrefix: audit.length > 0 ? true : false,
+  };
+}
+
+async function getRecoveryDiagnostics() {
+  const state = await store.load();
+  const lastRecovery = state.systemConfig?.lastRecoveryMonth || null;
+  const history = state.systemConfig?.monthlyRecoveryHistory || [];
+  const duplicates = history && Array.isArray(history) ? history.reduce((acc, cur) => { acc[cur.month] = (acc[cur.month] || 0) + 1; return acc; }, {}) : {};
+  return {
+    lastRecoveryMonth: lastRecovery,
+    monthlyRecoveryHistory: history || [],
+    duplicateEntries: Object.fromEntries(Object.entries(duplicates).filter(([k,v]) => v > 1)),
+  };
+}
+
 export {
   initEmployee, updateEmployee, listEmployees, getEmployee,
   createCallEvent, addCallAttempt,
@@ -2563,7 +2947,9 @@ export {
   createNightShiftEvent, addNightShiftPerson, removeNightShiftPerson, closeNightShiftEvent, getNightShiftMonthlyStats,
   reopenNightShiftEvent, getNightShiftAdvancedStats, cleanupOldEmptyNightEvents,
   // New exports: granular employee patching helpers
-  normalizeEmployeePatch, patchEmployee
+  normalizeEmployeePatch, patchEmployee,
+  // New helpers added for operational hardening
+  createAuditEntry, appendAuditEvent, validateImportPayload, getAuditDiagnostics, getRecoveryDiagnostics
 };
 
 // Indicador de finalización del módulo sábado v1.2
@@ -2574,3 +2960,6 @@ debugLog('FASE 3C — MODULO TURNO NOCHE IMPLEMENTADO');
 debugLog('FASE 3C.2 — VALIDACIONES Y HARDENING IMPLEMENTADO');
 debugLog('FASE 3C.3 — ANALISIS ESTRATEGICO TURNO NOCHE IMPLEMENTADO');
 debugLog('FASE 3C.3A — ESTRUCTURA SECTORES Y FUNCIONES IMPLEMENTADA');
+
+// Export preview helper for safe import merge (preflight, no write)
+export { safeImportMergePreview };

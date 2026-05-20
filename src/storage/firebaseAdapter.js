@@ -27,8 +27,6 @@ if (typeof window !== 'undefined' && APP_CONFIG && APP_CONFIG.STORAGE_BACKEND ==
 }
 
 
-let _firebaseAnonSignIn = null;
-
 // auth recovery: attempt anonymous sign-in with limited retries
 async function attemptAnonSignIn(maxAttempts = 3) {
   if (!getAuth || !signInAnonymously) return;

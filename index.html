@@ -35,7 +35,7 @@
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
       import { getDatabase, ref, set, get, runTransaction, update, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-      import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+      import { getAuth, signInAnonymously, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
       window.firebaseModules = {
         initializeApp,
@@ -47,7 +47,10 @@
         update,
         remove,
         getAuth,
-        signInAnonymously
+        signInAnonymously,
+        signInWithEmailAndPassword,
+        signOut,
+        onAuthStateChanged
       };
     </script>
 

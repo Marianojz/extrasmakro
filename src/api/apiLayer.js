@@ -173,7 +173,7 @@ function getRuntimeHealth() {
   return { runtime: rt };
 }
 
-function createOperation(
+function createOperation(domain, name, target, options = {}) {
   return Object.freeze({
     domain,
     name,
@@ -473,15 +473,15 @@ async function executeOperation(operation, args) {
       if (code === 'FIREBASE_PATCH_CONFLICT') {
         // conflict observed
         publishObservation('operation_conflict', { ...opMeta, attempt, message: error.message });
-        telemetry.PATCH_CONFLICT_RATE += 1;
+        telemetry.PATCH_CONFLICT_COUNT += 1;
       }
       if (code === 'LOCK_TIMEOUT' || (error && error.message && error.message.includes('LOCK_TIMEOUT'))) {
         publishObservation('lock_timeout', { ...opMeta, attempt, message: error.message });
-        telemetry.LOCK_TIMEOUT_RATE += 1;
+        telemetry.LOCK_TIMEOUT_COUNT += 1;
       }
       if (code === 'IMPORT_VALIDATION_FAILED') {
         publishObservation('operation_failed', { ...opMeta, attempt, message: error.message, errorCode: code });
-        telemetry.IMPORT_FAILURE_RATE += 1;
+        telemetry.IMPORT_FAILURE_COUNT += 1;
         throw error; // do not retry import validation failures
       }
 

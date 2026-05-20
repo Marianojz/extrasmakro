@@ -16,7 +16,28 @@ import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDE
 import { isFeatureEnabled } from './config/features.js';
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
+import './debug-panel.js';
+import runtimeDiagnostics from './runtimeDiagnostics.js';
+
+(function startupEnvironmentValidation(){
+  try {
+    const diag = runtimeDiagnostics.getEnvironmentDiagnostics();
+    window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {};
+    window.__HX_RUNTIME__.environmentDiagnostics = diag;
+    if (diag.degradedState) {
+      console.warn('[startup][degraded]', diag);
+      setTimeout(()=>{ try { if (typeof toast === 'function') toast('Startup degraded: check diagnostics', 'warning', 7000); } catch(e){} }, 2000);
+    } else {
+      console.info('[startup] environment ok', diag);
+    }
+  } catch (e) {
+    console.error('[startup][env-check-failed]', e);
+  }
+})();
+
 import { normalizeId } from './utils_id.js';
+import { initAuth, loginWithEmail, logout, getAuthDiagnostics, getCurrentUser } from './auth.js';
+import { hasRole, canAccess, canExecuteOperation } from './permissions.js';
 
 // Initialize backend through the API boundary
 if (APP_CONFIG.STORAGE_BACKEND === 'supabase') {
@@ -232,6 +253,15 @@ function confirmModal(msg, onConfirm) {
 const TABS = ['convocatorias','empleados','sabados','semana','turno_noche','estadisticas','dashboard','config'];
 
 function switchTab(tab) {
+  // Operational route guards
+  try {
+    const protectedTabs = new Set(['dashboard','config','imports','recovery']);
+    if (protectedTabs.has(tab) && typeof canAccess === 'function' && !canAccess(tab)) {
+      toast('Acceso denegado: permisos insuficientes', 'warning');
+      return;
+    }
+  } catch (e) { /* ignore guard errors */ }
+
   for (const t of TABS) {
     const sec = $id('tab-' + t);
     if (sec) sec.style.display = t === tab ? '' : 'none';
@@ -253,6 +283,9 @@ let empPageSz = 25;
 let empTurnoFilter = '';
 let startupAlerts = []; // {type:'warning'|'danger', msg:string}
 let weekPlannerKey = null; // semana visible en el planificador (se inicializa on DOMContentLoaded)
+// Convocatorias: filtros rápidos (estado y búsqueda)
+let callFilterState = '';
+let callFilterSearch = '';
 // Estado para Modo Móvil (UI only)
 let mobileMode = false;
 let mobileSatStep = 1;
@@ -429,14 +462,19 @@ async function mountUI() {
   const header = el('header', { class: 'app-header celsur-header' },
     el('div', { class: 'app-header-inner' },
       el('div', { class: 'app-brand' },
-        el('img', {
-          src: '/celsur-logo.png', alt: 'Celsur', class: 'app-logo-img',
-          onerror: "this.style.display='none'"
-        }),
+        el('img', { src: '/celsur-logo.png', alt: 'Celsur', class: 'app-logo-img', onerror: "this.style.display='none'" }),
         el('div', { class: 'app-brand-text' },
           el('span', { class: 'app-title' }, 'Extras Celsur'),
           el('span', { class: 'app-op' }, 'Op. Makro'),
           el('span', { class: 'app-subtitle muted small' }, 'Gestión de horas extras · CELSUR')
+        )
+      ),
+      // User / auth quick info
+      el('div', { id: 'user-info', class: 'user-info' },
+        el('span', { id: 'user-display', class: 'muted small' }, 'No autenticado'),
+        el('div', { id: 'auth-actions', style: 'display:inline-block;margin-left:8px' },
+          el('button', { id: 'btn-login', class: 'btn btn-sm', title: 'Iniciar sesión' }, 'Iniciar sesión'),
+          el('button', { id: 'btn-logout', class: 'btn btn-sm', title: 'Cerrar sesión', style: 'margin-left:6px' }, 'Cerrar sesión')
         )
       ),
       el('div', { id: 'shift-indicator', class: 'shift-badge' }),
@@ -445,13 +483,12 @@ async function mountUI() {
         el('button', { class: 'btn btn-action', onclick: () => switchTab('convocatorias'), title: 'Convocar' }, '📞 Convocar'),
         el('button', { class: 'btn btn-primary', onclick: () => switchTab('sabados'), title: 'Asignar sábado' }, '📅 Sábado'),
         el('button', { class: 'btn btn-info', onclick: () => switchTab('empleados'), title: 'Buscar empleado' }, '🔎 Buscar'),
-        el('button', { class: 'btn btn-secondary', onclick: () => switchTab('dashboard'), title: 'Abrir dashboard' }, '📈 Dashboard')
+        el('button', { class: 'btn btn-secondary', onclick: () => switchTab('dashboard'), title: 'Abrir dashboard' }, '📈 Dashboard'),
+        el('button', { id: 'debug-toggle-header', class: 'btn btn-secondary', onclick: () => { try { window.__HX_TOGGLE_DEBUG_PANEL__?.(); } catch(e){} }, title: 'Debug Panel (supervisor)' }, '🛠 Debug')
       ),
       el('button', { id: 'view-toggle-btn', class: 'view-toggle-btn', onclick: () => toggleMobileMode() }, '📱 Vista Móvil'),
-        featureOn('explainMode')
-          ? el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF')
-          : null,
-        el('span', { id: 'app-version', class: 'muted small' }, 'v' + (APP_CONFIG.APP_VERSION || '—'), createInfoIcon('Versión de la aplicación'))
+      featureOn('explainMode') ? el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF') : null,
+      el('span', { id: 'app-version', class: 'muted small' }, 'v' + (APP_CONFIG.APP_VERSION || '—'), createInfoIcon('Versión de la aplicación'))
     ),
     el('div', { class: 'app-header-bottom-line' })
   );
@@ -502,7 +539,40 @@ async function mountUI() {
   await refreshShiftIndicator();
   initExplainMode();
   await renderEmployees();
+
+  // Initialize auth and wire simple UI auth actions
+  try {
+    await initAuth({ onChange: (sess) => {
+      const disp = $id('user-display');
+      if (disp) disp.textContent = sess && sess.userId ? ((sess.role ? sess.role + ' · ' : '') + String(sess.userId)) : 'No autenticado';
+      const loginBtn = $id('btn-login');
+      const logoutBtn = $id('btn-logout');
+      if (loginBtn && logoutBtn) {
+        if (sess && sess.userId) { loginBtn.style.display = 'none'; logoutBtn.style.display = ''; }
+        else { loginBtn.style.display = ''; logoutBtn.style.display = 'none'; }
+      }
+      window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {};
+      window.__HX_RUNTIME__.authDiagnostics = getAuthDiagnostics();
+    } });
+
+    // wire login button (shows modal)
+    const lb = $id('btn-login');
+    if (lb) lb.addEventListener('click', async () => {
+      const body = el('div', {}, el('input', { id: 'login-email', type: 'email', class: 'input-full', placeholder: 'Email' }), el('input', { id: 'login-pass', type: 'password', class: 'input-full', placeholder: 'Password' }));
+      showModal('Iniciar sesión', body, [
+        { label: 'Cancelar', cls: 'btn btn-secondary', action: closeModal },
+        { label: 'Entrar', cls: 'btn btn-primary', action: async () => {
+          const email = $id('login-email').value; const pass = $id('login-pass').value;
+          try { await loginWithEmail(email, pass); closeModal(); toast('Autenticado', 'success'); } catch (e) { toast(String(e && e.message), 'error'); }
+        } }
+      ]);
+    });
+
+    const lob = $id('btn-logout');
+    if (lob) lob.addEventListener('click', async () => { try { await logout(); toast('Sesión cerrada', 'info'); } catch (e) { toast('Logout fallo', 'warning'); }});
+  } catch (e) { console.warn('Auth init/UI wiring failed', e); }
 }
+
 
 async function refreshShiftIndicator() {
   const cfg = await Models.getSystemConfig();
@@ -1415,6 +1485,9 @@ async function openEditEmployeeModal(id) {
 // ─── Modal: Importar CSV / XLS / XLSX ───────────────────────────────────────
 
 function openImportCsvModal() {
+  try {
+    if (typeof canExecuteOperation === 'function' && !canExecuteOperation('import')) { toast('Acceso denegado: no tiene permiso para importar', 'warning'); return; }
+  } catch (e) {}
   const body = el('div', {},
     el('p', {}, 'Acepta archivos CSV, XLS o XLSX. Columnas: nombre, legajo, puesto, turno_base, tipo, antiguedad_meses, fecha_fin, telefono.'),
     el('input', { id: 'csv-file-input', type: 'file', accept: '.csv,.xls,.xlsx', class: 'input-full' })
@@ -1490,17 +1563,82 @@ function doImportCsv() {
   }
 }
 
-// ─── Tab: Convocatorias ───────────────────────────────────────────────────────
+// ─── Tab: Convocatorias (UX V2) ───────────────────────────────────────────────
 
 function buildTabConvocatorias() {
   const sec = el('div', { id: 'tab-convocatorias', class: 'tab-section' });
+  const toolbar = el('div', { class: 'toolbar' },
+    el('input', { id: 'call-filter-search', type: 'text', class: 'input-search', placeholder: '🔍 Buscar por empleado, puesto o ID…', oninput: () => { callFilterSearch = $id('call-filter-search').value.trim().toLowerCase(); renderCallHistory(); } }),
+    el('select', { id: 'call-filter-state', class: 'select-sm', onchange: () => { callFilterState = $id('call-filter-state').value; renderCallHistory(); } },
+      el('option', { value: '' }, 'Todos los estados'),
+      el('option', { value: 'abierta' }, 'Abierta'),
+      el('option', { value: 'parcial' }, 'Parcial'),
+      el('option', { value: 'completa' }, 'Completa'),
+      el('option', { value: 'cerrada' }, 'Cerrada'),
+      el('option', { value: 'vencida' }, 'Vencida'),
+      el('option', { value: 'conflictiva' }, 'Conflictiva'),
+      el('option', { value: 'recovery_pending' }, 'Recovery pending')
+    ),
+    el('button', { class: 'btn btn-secondary', onclick: () => { callFilterState = ''; callFilterSearch = ''; $id('call-filter-search').value = ''; $id('call-filter-state').value = ''; renderCallHistory(); } }, 'Limpiar filtros'),
+    el('button', { class: 'btn btn-primary', onclick: () => { switchTab('dashboard'); } }, 'Volver a Dashboard')
+  );
+
   sec.append(
     el('h2', { class: 'section-title' }, 'Convocatorias'),
-    el('p', { class: 'section-desc' }, 'Para iniciar una convocatoria, seleccioná un empleado desde la pestaña Empleados y hacé clic en "📞 Convocar".'),
+    el('p', { class: 'section-desc' }, 'Gestión de convocatorias — estados claros, timeline de intentos y acciones rápidas.'),
+    toolbar,
     el('div', { id: 'call-history-list' })
   );
   renderCallHistory();
   return sec;
+}
+
+function getCallState(c) {
+  // states: abierta, parcial, completa, cerrada, vencida, conflictiva, recovery_pending
+  try {
+    const attempts = Array.isArray(c.attempts) ? c.attempts : [];
+    const hasFinal = !!c.resultado_final;
+    const tsDate = c.fecha || c.timestamp || null;
+    const todayIso = new Date().toISOString().slice(0,10);
+    if (c.recovery_pending) return 'recovery_pending';
+    if (c.__conflict || c.conflict) return 'conflictiva';
+    if (hasFinal) {
+      if (c.resultado_final === 'confirmado') return 'completa';
+      return 'cerrada';
+    }
+    if (attempts.length === 0) return 'abierta';
+    if (attempts.length === 1 && !hasFinal) return 'parcial';
+    if (tsDate && tsDate < todayIso && !hasFinal) return 'vencida';
+    return 'abierta';
+  } catch (e) { return 'abierta'; }
+}
+
+function renderAttemptTimeline(attempts = []) {
+  const wrap = el('div', { class: 'attempt-timeline' });
+  for (const a of attempts.slice().reverse()) {
+    const lbl = a.status || a.state || '—';
+    const time = a.ts || a.timestamp || a.createdAt || '';
+    const node = el('div', { class: 'attempt-row' },
+      el('span', { class: 'attempt-status' }, lbl),
+      el('span', { class: 'attempt-time muted' }, time ? new Date(time).toLocaleString() : '')
+    );
+    wrap.appendChild(node);
+  }
+  return wrap;
+}
+
+async function quickRepeatCall(callId) {
+  try {
+    const state = await Models.exportState();
+    const call = state.callEvents?.[callId];
+    if (!call) { toast('Convocatoria origen no encontrada', 'error'); return; }
+    const today = new Date();
+    const fecha = today.toISOString().slice(0,10);
+    const newEv = await Models.createCallEvent({ empleado_id: call.empleado_id, fecha, tipo_extra: call.tipo_extra, supervisor_id: call.supervisor_id });
+    toast('Convocatoria creada rápidamente', 'success');
+    await renderCallHistory();
+    return newEv;
+  } catch (e) { toast(e.message || 'Error al repetir convocatoria', 'error'); }
 }
 
 async function renderCallHistory() {
@@ -1511,34 +1649,62 @@ async function renderCallHistory() {
   const calls = Object.values(state.callEvents || {});
   if (!calls.length) { cont.appendChild(el('div', { class: 'empty-state' }, 'No hay convocatorias registradas.')); return; }
 
-  const sorted = [...calls].sort((a, b) => b.timestamp?.localeCompare(a.timestamp));
-  const tbl = el('table', { class: 'data-table' });
-  tbl.appendChild(el('thead', {}, el('tr', {},
-    el('th', {}, 'Empleado'), el('th', {}, 'Puesto'), el('th', {}, 'Fecha'), el('th', {}, 'Tipo extra'),
-    el('th', {}, 'Intentos'), el('th', {}, 'Resultado'), el('th', {}, 'Acciones')
-  )));
-  const tbody = el('tbody');
-  for (const c of sorted.slice(0, 100)) {
-    const emp = state.employees[c.empleado_id];
-    const resultBadge = c.resultado_final
-      ? el('span', { class: `badge ${c.resultado_final === 'confirmado' ? 'badge-success' : 'badge-danger'}` }, c.resultado_final)
-      : el('span', { class: 'badge badge-warning' }, 'Pendiente');
-    tbody.appendChild(el('tr', {},
-      el('td', {}, emp ? emp.name : c.empleado_id),
-      el('td', { class: 'muted' }, emp?.puesto || '—'),
-      el('td', {}, c.fecha || '—'),
-      el('td', {}, c.tipo_extra || '—'),
-      el('td', {}, String(c.attempts?.length || 0) + ' / 2'),
-      el('td', {}, resultBadge),
-      el('td', { class: 'actions' },
-        !c.resultado_final
-          ? el('button', { class: 'btn btn-sm btn-primary', onclick: () => openAttemptModal(c.id) }, 'Registrar intento')
-          : el('span', { class: 'muted' }, 'Cerrada')
-      )
-    ));
+  // Apply filters
+  let filtered = calls.slice();
+  if (callFilterSearch) {
+    filtered = filtered.filter(c => {
+      const emp = state.employees?.[c.empleado_id];
+      const name = (emp?.name || '').toLowerCase();
+      const puesto = (emp?.puesto || '').toLowerCase();
+      return name.includes(callFilterSearch) || (c.empleado_id || '').toLowerCase().includes(callFilterSearch) || puesto.includes(callFilterSearch) || (c.tipo_extra||'').toLowerCase().includes(callFilterSearch);
+    });
   }
-  tbl.appendChild(tbody);
-  cont.appendChild(tbl);
+  if (callFilterState) {
+    filtered = filtered.filter(c => getCallState(c) === callFilterState);
+  }
+
+  // Recent first
+  const sorted = filtered.sort((a,b) => (b.timestamp||b.createdAt||'').localeCompare(a.timestamp||a.createdAt||''));
+
+  const list = el('div', { class: 'call-list' });
+  for (const c of sorted.slice(0, 200)) {
+    const emp = state.employees?.[c.empleado_id] || { name: c.empleado_id, puesto: '—' };
+    const stateKey = getCallState(c);
+    const stateMap = {
+      abierta: { cls: 'badge-state-open', label: 'Abierta', color: 'var(--info)' },
+      parcial: { cls: 'badge-state-partial', label: 'Parcial', color: 'var(--warning)' },
+      completa: { cls: 'badge-state-complete', label: 'Completa', color: 'var(--success)' },
+      cerrada: { cls: 'badge-state-closed', label: 'Cerrada', color: 'var(--danger)' },
+      vencida: { cls: 'badge-state-expired', label: 'Vencida', color: '#b45309' },
+      conflictiva: { cls: 'badge-state-conflict', label: 'Conflictiva', color: '#7c3aed' },
+      recovery_pending: { cls: 'badge-state-recovery', label: 'Recovery', color: '#065f46' }
+    };
+    const st = stateMap[stateKey] || stateMap.abierta;
+
+    const row = el('div', { class: 'call-row card' },
+      el('div', { class: 'call-row-main' },
+        el('div', { class: 'call-left' },
+          el('div', { class: 'call-emp' }, el('strong', {}, safeText(emp.name)), el('div', { class: 'mono muted small' }, emp.id || c.empleado_id)),
+          el('div', { class: 'call-meta muted small' }, emp.puesto || '—', ' · ', c.tipo_extra || '—')
+        ),
+        el('div', { class: 'call-right' },
+          el('span', { class: `badge ${st.cls}`, style: `background:${st.color};color:#fff;padding:6px 10px;border-radius:14px;font-weight:600;` }, st.label),
+          el('div', { class: 'call-date muted small' }, c.fecha || c.timestamp || '')
+        )
+      ),
+      el('div', { class: 'call-row-body' },
+        el('div', { class: 'call-timeline' }, renderAttemptTimeline(c.attempts || [])),
+        el('div', { class: 'call-actions' },
+          !c.resultado_final ? el('button', { class: 'btn btn-sm btn-primary', onclick: () => openAttemptModal(c.id) }, 'Registrar intento') : el('span', { class: 'muted' }, 'Cerrada'),
+          el('button', { class: 'btn btn-sm btn-secondary', onclick: () => quickRepeatCall(c.id) }, 'Convocar de nuevo'),
+          el('button', { class: 'btn btn-sm btn-info', onclick: () => { showModal('Detalles convocatoria', el('pre',{class:'muted'}, JSON.stringify(c,null,2))); } }, 'Ver raw')
+        )
+      )
+    );
+    list.appendChild(row);
+  }
+
+  cont.appendChild(list);
 }
 
 async function openCallModal(employeeId) {
@@ -3050,7 +3216,7 @@ function buildDataPanel() {
       el('p', { class: 'muted' }, `+${2} de reputación a empleados activos sin penalizaciones en el mes elegido. Ejecutá una sola vez por cierre mensual.`),
       el('div', { class: 'toolbar' },
         el('input', { id: 'recovery-month', type: 'month', class: 'input-sm', value: new Date().toISOString().slice(0, 7) }),
-        el('button', { class: 'btn btn-success', onclick: doApplyMonthlyRecovery }, 'Aplicar recuperación mensual')
+        el('button', { class: 'btn btn-success', onclick: async () => { try { if (typeof canExecuteOperation === 'function' && !canExecuteOperation('applyMonthlyRecovery')) { toast('Acceso denegado: permiso requerido', 'warning'); return; } await doApplyMonthlyRecovery(); } catch (e) { toast(String(e && e.message), 'error'); } } }, 'Aplicar recuperación mensual')
       )
     )
     : null;

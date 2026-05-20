@@ -238,6 +238,47 @@ a:hover { text-decoration: underline; }
   margin-bottom: 12px;
 }
 .card h3 { font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 12px; }
+
+/* Convocatorias UX V2 styles */
+.call-list { display: flex; flex-direction: column; gap: 10px; }
+.call-row { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.call-row-main { display:flex; justify-content: space-between; align-items: center; gap:12px; }
+.call-left { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.call-emp strong { font-size: 15px; }
+.call-meta { color: var(--muted); }
+.call-right { text-align: right; min-width:140px; }
+.call-date { color: var(--muted); font-size: 12px; }
+.call-row-body { display:flex; gap:12px; align-items:flex-start; justify-content: space-between; }
+.call-timeline { flex:1; min-width: 0; }
+.attempt-timeline { display:flex; flex-direction:column; gap:6px; }
+.attempt-row { display:flex; justify-content:space-between; align-items:center; background: #fafafa; border:1px solid var(--border); padding:6px 8px; border-radius:6px; }
+.attempt-status { font-weight:600; font-size:13px; }
+.attempt-time { color: var(--muted); font-size:12px; margin-left:8px; }
+.call-actions { display:flex; gap:8px; align-items:center; }
+
+/* Badges by state (small, consistent) */
+.badge-state-open { background: var(--info); }
+.badge-state-partial { background: var(--warning); }
+.badge-state-complete { background: var(--success); }
+.badge-state-closed { background: var(--danger); }
+.badge-state-expired { background: #b45309; }
+.badge-state-conflict { background: #7c3aed; }
+.badge-state-recovery { background: #065f46; }
+
+/* Compact action buttons */
+.btn-sm { padding:6px 9px; font-size:13px; border-radius:8px; }
+
+/* Filters toolbar tweaks */
+.toolbar .input-search { max-width:320px; }
+.toolbar .select-sm { margin-left:8px; }
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .call-row-body { flex-direction: column; }
+  .call-right { text-align: left; }
+  .call-row { padding:10px; }
+}
+
 .card h4 { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; }
 
 /* ─── Toolbar ───────────────────────────────────────────────────────────────── */
@@ -1157,6 +1198,62 @@ body.desktop-mode .mobile-bottom-nav { display: none !important; }
   margin-bottom: 14px;
   box-shadow: var(--shadow-sm);
 }
+
+/* ─── Debug Panel / Runtime Inspector (FASE B) ───────────────────────────────── */
+.debug-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 420px;
+  max-width: calc(100% - 36px);
+  max-height: calc(100vh - 36px);
+  background: #0b1020; /* dark surface */
+  color: #e6eef9;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(2,6,23,0.6);
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--font);
+  font-size: 13px;
+}
+.debug-panel.hidden { display: none; }
+.debug-panel .dp-header {
+  display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; background: linear-gradient(90deg, rgba(29,78,216,.12), rgba(37,99,235,.06));
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.debug-panel .dp-title { font-weight:800; color: #fff; font-size:14px }
+.debug-panel .dp-controls { display:flex; gap:6px; }
+.debug-panel .dp-controls button { background:transparent; border:1px solid rgba(255,255,255,0.06); color:inherit; padding:6px 8px; border-radius:6px; cursor:pointer }
+.debug-panel .dp-body { padding:10px 12px; overflow:auto; flex:1; }
+.debug-panel .dp-section { margin-bottom:10px; }
+.debug-panel .dp-section h4 { margin:0 0 8px 0; font-size:13px; color:#dbeafe }
+.debug-panel .dp-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; }
+.debug-panel .dp-item { background: rgba(255,255,255,0.02); padding:8px; border-radius:6px; }
+.debug-panel .dp-event-stream { max-height: 160px; overflow:auto; background: rgba(0,0,0,0.15); padding:8px; border-radius:6px; font-family: monospace; font-size:12.5px }
+.debug-panel .dp-event { padding:6px 6px; border-bottom:1px solid rgba(255,255,255,0.03); }
+.debug-panel .dp-event.critical { background: rgba(220,38,38,0.06); color:#ffdede }
+.debug-panel .dp-event.warning  { background: rgba(217,119,6,0.04); color:#fff6e8 }
+.debug-panel .dp-footer { padding:8px 12px; border-top:1px solid rgba(255,255,255,0.03); display:flex; gap:8px; justify-content:flex-end; }
+.debug-panel .dp-btn { background: #102030; color:#e6eef9; border:1px solid rgba(255,255,255,0.04); padding:6px 10px; border-radius:8px; cursor:pointer }
+@media (max-width: 640px) { .debug-panel { right: 8px; left: 8px; width: auto; bottom: 12px; max-height: 60vh } }
+
+/* visual tokens for operational semantics */
+.op-success { color: var(--success); font-weight:700 }
+.op-warning { color: var(--warning); font-weight:700 }
+.op-critical { color: var(--danger); font-weight:700 }
+.op-degraded { color: #b45309; font-weight:700 }
+.op-loading { color: #60a5fa }
+.op-inactive { color: #94a3b8 }
+
+/* small health summary widget */
+.health-pill { display:flex; gap:8px; align-items:center; padding:8px; border-radius:8px; background: rgba(255,255,255,0.02); }
+.health-dot { width:10px; height:10px; border-radius:50%; }
+.health-dot.ok { background: var(--success) }
+.health-dot.warn { background: var(--warning) }
+.health-dot.crit { background: var(--danger) }
+
 .mobile-ranking-mini h4 {
   font-size: 11px;
   font-weight: 700;
