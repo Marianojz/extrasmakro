@@ -17,7 +17,7 @@
 
 export const APP_CONFIG = {
   /** Backend de storage: 'local' | 'firebase' | 'supabase' */
-  STORAGE_BACKEND: 'firebase',
+  STORAGE_BACKEND: 'local',
 
   /** Credenciales de Supabase (requeridas si STORAGE_BACKEND === 'supabase') */
   SUPABASE_URL: 'https://TU_PROYECTO.supabase.co',
