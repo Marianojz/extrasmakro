@@ -1,8 +1,22 @@
 // runtime.js — Consolidated runtime telemetry and standardized APIs
 (function(){
   if (typeof window === 'undefined') return;
-  // capture existing runtime and keep raw copy for diagnostics
-  const existing = window.__HX_RUNTIME__ && typeof window.__HX_RUNTIME__ === 'object' ? structuredClone(window.__HX_RUNTIME__) : {};
+  // capture existing runtime and keep raw copy for diagnostics (defensive: avoid structuredClone failures on functions)
+  let existing = {};
+  if (window.__HX_RUNTIME__ && typeof window.__HX_RUNTIME__ === 'object') {
+    try {
+      existing = structuredClone(window.__HX_RUNTIME__);
+    } catch (err) {
+      // fallback: copy only serializable known keys to avoid DataCloneError
+      const whitelisted = ['build','retries','conflicts','degraded','storage','adapterStatus','firebaseDiagnostics','firebaseHealth','events','operationHistory'];
+      existing = {};
+      whitelisted.forEach(k => {
+        try {
+          if (k in window.__HX_RUNTIME__) existing[k] = JSON.parse(JSON.stringify(window.__HX_RUNTIME__[k]));
+        } catch (e) { /* skip non-serializable entries */ }
+      });
+    }
+  }
   const CAP_HISTORY = 200;
 
   const runtime = {
