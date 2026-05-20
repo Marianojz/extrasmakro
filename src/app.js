@@ -18,6 +18,8 @@ const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
 import './debug-panel.js';
 import runtimeDiagnostics from './runtimeDiagnostics.js';
+import './storage/cleanup-lite.js';
+import supervisor from './supervisor.js';
 
 (function startupEnvironmentValidation(){
   try {
@@ -250,7 +252,7 @@ function confirmModal(msg, onConfirm) {
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
 
-const TABS = ['convocatorias','empleados','sabados','semana','turno_noche','estadisticas','dashboard','config'];
+const TABS = ['convocatorias','empleados','sabados','semana','turno_noche','estadisticas','dashboard','supervisor','config'];
 
 function switchTab(tab) {
   // Operational route guards
@@ -432,6 +434,71 @@ function buildTabDashboard() {
   const rtCard = el('div', { class: 'card' }, el('h4', {}, 'Runtime Operational Health'), el('div', { id: 'runtime-inspector' }, 'Cargando estado runtime…'));
   sec.appendChild(rtCard);
 
+  // Executive analytics panel (explainable, read-only)
+  const analyticsCard = el('div', { class: 'card' }, el('h4', {}, 'Executive Operational Summary'), el('div', { id: 'exec-analytics-root' }, 'Cargando analytics…'));
+  sec.appendChild(analyticsCard);
+
+  async function renderAnalytics() {
+    const root = $id('exec-analytics-root');
+    if (!root) return;
+    root.innerHTML = '';
+
+    // Prefer analytics exposed on runtime; fall back to local module if available
+    const rt = window.__HX_RUNTIME__ || {};
+    const analytics = rt.analytics || (window?.Analytics) || null;
+
+    // collect minimal snapshot from models/telemetry
+    let state = {};
+    try {
+      const exported = await Models.exportState?.() || {};
+      state.calls = Object.values(exported.callEvents || {});
+      state.employees = Object.values(exported.employees || {});
+    } catch (e) {
+      // best-effort: try to read from other model surfaces
+      try { state.calls = Object.values((await Models.listCalls?.()) || {}); } catch (_) { state.calls = []; }
+      try { state.employees = Array.isArray(await Models.listEmployees?.()) ? await Models.listEmployees() : Object.values(await Models.listEmployees?.() || {}); } catch (_) { state.employees = []; }
+    }
+
+    // telemetry / readiness
+    const telemetry = (api.meta && typeof api.meta.getTelemetry === 'function') ? api.meta.getTelemetry() : (rt.productionReadiness || rt.runtimeTelemetry || {});
+    state.telemetry = telemetry;
+
+    if (!analytics || typeof analytics.summarizeExecutiveDashboard !== 'function') {
+      root.appendChild(el('div', { class: 'muted' }, 'Analytics engine no disponible en este entorno.')); 
+      root.appendChild(el('div', { class: 'muted small' }, 'Verifica window.__HX_RUNTIME__.analytics')); 
+      return;
+    }
+
+    try {
+      const summary = analytics.summarizeExecutiveDashboard({ calls: state.calls, employees: state.employees, telemetry: telemetry });
+      // concise KPIs
+      const k = el('div', { class: 'exec-kpis' });
+      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Convocatorias'), el('div', { class: 'kpi-value' }, String(summary.totalCalls))));
+      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Aceptaciones'), el('div', { class: 'kpi-value' }, summary.acceptanceRate + '%')));
+      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Rechazos'), el('div', { class: 'kpi-value' }, summary.rejectionRate + '%')));
+      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Participación'), el('div', { class: 'kpi-value' }, summary.participationRate + '%')));
+      root.appendChild(k);
+
+      // small charts / trend text (last7Average)
+      const trend = el('div', { class: 'exec-trend' }, el('strong', {}, 'Tend. última semana: '), el('span', {}, String(summary.last7Average)));
+      root.appendChild(trend);
+
+      // readiness
+      if (summary.readinessScore != null) root.appendChild(el('div', { class: 'exec-readiness' }, el('strong', {}, 'Readiness: '), el('span', {}, String(summary.readinessScore))));
+
+      // export buttons
+      const btns = el('div', { class: 'exec-analytics-actions' });
+      btns.appendChild(el('button', { class: 'btn btn-secondary', onclick: () => { const txt = analytics.generateReport('weekly', summary, 'json'); const b = new Blob([txt], { type: 'application/json' }); downloadBlob(b, 'executive_summary.json'); } }, 'Exportar JSON'));
+      btns.appendChild(el('button', { class: 'btn btn-secondary', onclick: () => { const csv = analytics.generateReport('weekly', { rows: [ summary ] }, 'csv'); const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }); downloadBlob(b, 'executive_summary.csv'); } }, 'Exportar CSV'));
+      btns.appendChild(el('button', { class: 'btn btn-secondary', onclick: () => { const printable = '<pre>' + JSON.stringify(summary, null, 2) + '</pre>'; showModal('Executive Summary (print)', el('div', { html: printable }), [{ label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal }, { label: 'Imprimir', cls: 'btn btn-primary', action: () => { const w = window.open('', '_blank'); w.document.write('<html><head><title>Executive Summary</title></head><body>' + printable + '</body></html>'); w.print(); } }]); } }, 'Ver / Imprimir'));
+      root.appendChild(btns);
+
+    } catch (e) {
+      console.error('Analytics render failed', e);
+      root.appendChild(el('div', { class: 'text-danger' }, 'Error al generar analytics. Revisa consola.'));
+    }
+  }
+
   function renderRuntime() {
     const rt = window.__HX_RUNTIME__ || {};
     const root = $id('runtime-inspector');
@@ -446,7 +513,79 @@ function buildTabDashboard() {
     rows.forEach(r => root.appendChild(r));
   }
   renderRuntime();
-  setInterval(renderRuntime, 6000);
+  setInterval(()=>{ renderRuntime(); renderAnalytics(); }, 6000);
+
+  // initial analytics render
+  renderAnalytics();
+
+  return sec;
+}
+
+function buildTabSupervisor() {
+  const sec = el('div', { id: 'tab-supervisor', class: 'tab-section' });
+  sec.appendChild(el('h2', { class: 'section-title' }, 'Supervisor Assistance'));
+  sec.appendChild(el('p', { class: 'section-desc' }, 'Sugerencias, alertas y herramientas rápidas para supervisores.'));
+
+  const suggestionsRoot = el('div', { id: 'supervisor-suggestions', class: 'card' }, el('h4', {}, 'Sugerencias Inteligentes'));
+  const alertsRoot = el('div', { id: 'supervisor-alerts', class: 'card' }, el('h4', {}, 'Alertas Operacionales'));
+  const toolsRoot = el('div', { id: 'supervisor-tools', class: 'card' }, el('h4', {}, 'Herramientas rápidas'));
+
+  sec.appendChild(suggestionsRoot);
+  sec.appendChild(alertsRoot);
+  sec.appendChild(toolsRoot);
+
+  (async () => {
+    try {
+      const data = await supervisor.getSupervisorSummary();
+
+      // Render suggestions
+      const sug = $id('supervisor-suggestions');
+      if (sug) {
+        const list = el('div', { class: 'suggestion-list' });
+        if (Array.isArray(data.topSuggestions) && data.topSuggestions.length) {
+          data.topSuggestions.forEach((s, idx) => {
+            const node = el('div', { class: 'suggestion-row' },
+              el('div', { class: 'suggestion-rank' }, String(idx + 1)),
+              el('div', { class: 'suggestion-body' },
+                el('div', { class: 'suggestion-title' }, s.name || s.id || 'Empleado'),
+                el('div', { class: 'suggestion-meta muted' }, 'Score: ' + (s.__meta && s.__meta.score != null ? s.__meta.score.toFixed(1) : '—')),
+                el('div', { class: 'suggestion-explain small muted' }, s.__meta && s.__meta.explain ? s.__meta.explain : (s.reason || 'Score calculado: horas, reputación, confiabilidad'))
+              )
+            );
+            list.appendChild(node);
+          });
+        } else {
+          list.appendChild(el('div', { class: 'empty-state' }, 'No hay sugerencias disponibles.'));
+        }
+        sug.appendChild(list);
+      }
+
+      // Render alerts
+      const al = $id('supervisor-alerts');
+      if (al) {
+        const list = el('div', { class: 'alerts-list' });
+        (data.alerts || []).forEach(a => {
+          list.appendChild(el('div', { class: 'alert-row' + (a.level === 'critical' ? ' critical' : '') }, el('strong', {}, a.msg)));
+        });
+        al.appendChild(list);
+      }
+
+      // Render quick tools
+      const tr = $id('supervisor-tools');
+      if (tr) {
+        const quick = el('div', { class: 'quick-tools' },
+          el('button', { class: 'btn btn-secondary', onclick: () => showModal('Runtime Health', el('pre', { class: 'mono' }, JSON.stringify(window.__HX_RUNTIME__ || {}, null, 2))) }, 'Runtime Health'),
+          el('button', { class: 'btn btn-secondary', onclick: async () => { const telemetry = api.meta.getTelemetry(); showModal('Retry & Conflict Diagnostics', el('pre', { class: 'mono' }, JSON.stringify(telemetry, null, 2))); } }, 'Retry Diagnostics'),
+          el('button', { class: 'btn btn-secondary', onclick: async () => { const health = api.meta.generateOperationalHealthSummary(); showModal('Operational Health', el('pre', { class: 'mono' }, JSON.stringify(health, null, 2))); } }, 'Conflict Diagnostics'),
+          el('button', { class: 'btn btn-primary', onclick: () => { const body = el('div', {}, el('input', { id: 'quick-emp-id', class: 'input-full', placeholder: 'ID o nombre empleado' })); showModal('Employee quick lookup', body, [ { label: 'Buscar', cls: 'btn btn-primary', action: async () => { const v = $id('quick-emp-id').value.trim(); try { const emp = await Models.getEmployee(v); if (!emp) { toast('Empleado no encontrado','warning'); return; } showModal('Empleado', el('pre',{class:'mono'}, JSON.stringify(emp, null, 2)), [{ label:'Cerrar', cls:'btn btn-secondary', action: closeModal }]); } catch(e){ toast('Lookup failed','error'); } } }, { label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal } ]); } }, 'Employee lookup')
+        );
+        tr.appendChild(quick);
+      }
+
+    } catch (e) {
+      console.error('Supervisor panel failed to load', e);
+    }
+  })();
 
   return sec;
 }
@@ -501,8 +640,10 @@ async function mountUI() {
     sabados: '📅 Sábados v1.2',
     turno_noche: '🌙 Turno Noche',
     estadisticas: '📊 Estadísticas',
-    config: '⚙️ Config',
-  };
+      dashboard: '🧾 Dashboard',
+      supervisor: '🧭 Supervisor',
+      config: '⚙️ Config',
+    };
   const nav = el('nav', { class: 'nav-tabs' });
   for (const t of TABS) {
     const btn = el('button', { class: 'nav-tab', 'data-tab': t, onclick: () => switchTab(t) }, tabLabels[t]);
@@ -515,11 +656,12 @@ async function mountUI() {
       buildTabEmpleados(),
       buildTabSabados(),
       buildTabSemana(),
-    buildTabTurnoNoche(),
-    buildTabEstadisticas(),
+        buildTabTurnoNoche(),
+        buildTabEstadisticas(),
       buildTabDashboard(),
-      buildTabConfig()
-    );
+        buildTabSupervisor(),
+        buildTabConfig()
+      );
 
   const alertBar = el('div', { id: 'alert-bar', class: 'alert-bar' });
   const footer = el('footer', { class: 'app-footer' }, 'creado por M. Zequeira');

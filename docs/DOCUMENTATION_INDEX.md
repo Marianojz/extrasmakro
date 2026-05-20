@@ -8,6 +8,11 @@ Documentos Activos
 ------------------
 - Módulo Sábados (consolidado): [MODULO_SABADO.md](active/MODULO_SABADO.md)
 - Auditoría técnica: [AUDITORIA_TECNICA_TOTAL_v3.md](AUDITORIA_TECNICA_TOTAL_v3.md)
+- Production Guide (rollout + checks): [PRODUCTION_GUIDE.md](active/PRODUCTION_GUIDE.md)
+- Incident Response (runbook): [INCIDENT_RESPONSE.md](active/INCIDENT_RESPONSE.md)
+- Backup & Recovery (snapshots): [BACKUP_RECOVERY.md](active/BACKUP_RECOVERY.md)
+- Operational Playbook (monitor window): [OPERATIONAL_PLAYBOOK.md](active/OPERATIONAL_PLAYBOOK.md)
+- Firebase Operations (safe writes & diagnostics): [FIREBASE_OPERATIONS.md](active/FIREBASE_OPERATIONS.md)
 
 Documentos Gobernanza
 ----------------------

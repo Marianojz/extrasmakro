@@ -53,6 +53,8 @@ export const APP_CONFIG = {
   TOTAL_HORAS_FORMULA: 'total_horas = (horas_50 * 1) + (horas_100 * 2)',
   /** Versión de la aplicación (UI) */
   APP_VERSION: '0.1.0',
+  /** Supervisor thresholds */
+  SUPERVISOR_OVERUSE_THRESHOLD: 8,
 };
 
 // Modo debug global: imprimir sólo logs técnicos cuando es true

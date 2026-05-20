@@ -19,8 +19,11 @@ const telemetry = {
   OPERATION_ERROR_COUNT: 0,
   LOCK_TIMEOUT_COUNT: 0,
   IMPORT_FAILURE_COUNT: 0,
+  WRITE_OPERATION_COUNT: 0, // approximate write operations counter (for cost awareness)
   // durations history (ms)
   OPERATION_DURATIONS_MS: [],
+  // counts by operation category (e.g., read/write/audit/maintenance)
+  OPERATION_TYPE_COUNTS: {},
   // recent detailed observations for detection (capped)
   RECENT_OBSERVATIONS: [],
   // config for local thresholds and persistence
@@ -31,7 +34,9 @@ const telemetry = {
     repeatedConflictsThreshold: 3,
     lockTimeoutThreshold: 3,
     historySize: 200,
-    // telemetry is in-memory only; do not persist historical telemetry
+    // optional persist key for lightweight snapshots (not used by default)
+    persistKey: 'hx_telemetry_snapshot_v1',
+    // telemetry is in-memory only; do not persist historical telemetry by default
     },
 };
 
@@ -50,8 +55,12 @@ function getTelemetry() {
     OPERATION_ERROR_COUNT: telemetry.OPERATION_ERROR_COUNT,
     LOCK_TIMEOUT_COUNT: telemetry.LOCK_TIMEOUT_COUNT,
     IMPORT_FAILURE_COUNT: telemetry.IMPORT_FAILURE_COUNT,
+    WRITE_OPERATION_COUNT: telemetry.WRITE_OPERATION_COUNT || 0,
     OPERATION_DURATIONS_MS: [...telemetry.OPERATION_DURATIONS_MS],
     RECENT_OBSERVATIONS: [...telemetry.RECENT_OBSERVATIONS],
+
+    // operation type breakdown
+    OPERATION_TYPE_COUNTS: { ...telemetry.OPERATION_TYPE_COUNTS },
 
     // derived rates
     OPERATION_COUNT: opCount,
@@ -452,8 +461,17 @@ async function executeOperation(operation, args) {
       opMeta.durationMs = duration;
       telemetry.OPERATION_DURATIONS_MS.push(duration);
 
-      // emit duration event for operational analysis
-      publishObservation('operation_duration', { ...opMeta, attempt, durationMs: duration });
+            // approximate write counting for cost-awareness and operation-type breakdown
+            try {
+              if (opMeta && opMeta.write) {
+                telemetry.WRITE_OPERATION_COUNT = (telemetry.WRITE_OPERATION_COUNT || 0) + 1;
+              }
+              const cat = opMeta && opMeta.operationCategory ? opMeta.operationCategory : (opMeta && opMeta.operationType ? opMeta.operationType.split('.')[0] : 'unknown');
+              telemetry.OPERATION_TYPE_COUNTS[cat] = (telemetry.OPERATION_TYPE_COUNTS[cat] || 0) + 1;
+            } catch (e) { /* best-effort */ }
+
+            // emit duration event for operational analysis
+            publishObservation('operation_duration', { ...opMeta, attempt, durationMs: duration });
 
       if (attempt > 1) {
         telemetry.RETRY_SUCCESS_COUNT += 1;
@@ -586,34 +604,83 @@ function updateRuntimeTelemetry(opMeta, outcome, extra = {}) {
 
 function normalizeOperationalError(err, correlationId = null) {
   const ts = new Date().toISOString();
-  if (!err) return { code: 'UNKNOWN_ERROR', message: 'Unknown error', correlationId, retryable: false, severity: 'critical', timestamp: ts };
-  const rawCode = err.code || null;
-  const msg = err.message || String(err);
+  const safeToString = (v) => {
+    try {
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      if (typeof v === 'object' && v.message) return String(v.message);
+      return String(v);
+    } catch (e) { return '<<unserializable>>'; }
+  };
+
+  if (!err) return { code: 'UNKNOWN_ERROR', message: 'Unknown error', rawCode: null, correlationId, retryable: false, severity: 'critical', timestamp: ts };
+
+  const rawCode = (typeof err.code !== 'undefined' && err.code !== null) ? err.code : null;
+  const msg = safeToString(err.message || err || '');
+
+  // canonical severity values
+  const S = { INFO: 'info', WARNING: 'warning', ERROR: 'error', CRITICAL: 'critical' };
+
+  // base normalized shape
+  const normalized = { code: 'UNKNOWN_ERROR', rawCode, message: msg || 'Unknown error', correlationId, retryable: false, severity: S.ERROR, timestamp: ts };
+
+  const lc = String(msg).toLowerCase();
 
   // Map to canonical codes required by operational layer
-  if (rawCode === 'FIREBASE_PATCH_CONFLICT' || rawCode === 'PATCH_CONFLICT' || msg.toLowerCase().includes('conflict')) {
-    return { code: 'PATCH_CONFLICT', message: msg, correlationId, retryable: true, severity: 'warning', timestamp: ts };
+  if (rawCode === 'FIREBASE_PATCH_CONFLICT' || rawCode === 'PATCH_CONFLICT' || lc.includes('conflict')) {
+    normalized.code = 'PATCH_CONFLICT';
+    normalized.retryable = true;
+    normalized.severity = S.WARNING;
+    return normalized;
   }
 
-  if (rawCode === 'QUOTA_EXCEEDED' || msg.toLowerCase().includes('quota')) {
-    return { code: 'QUOTA_EXCEEDED', message: msg, correlationId, retryable: false, severity: 'critical', timestamp: ts };
+  if (rawCode === 'QUOTA_EXCEEDED' || lc.includes('quota')) {
+    normalized.code = 'QUOTA_EXCEEDED';
+    normalized.retryable = false;
+    normalized.severity = S.CRITICAL;
+    return normalized;
   }
 
-  if (rawCode === 'LOCK_TIMEOUT' || msg.toLowerCase().includes('lock_timeout') || msg.toLowerCase().includes('lock timeout') || msg.toLowerCase().includes('storage locked')) {
-    return { code: 'STORAGE_LOCKED', message: msg, correlationId, retryable: true, severity: 'warning', timestamp: ts };
+  if (rawCode === 'LOCK_TIMEOUT' || lc.includes('lock_timeout') || lc.includes('lock timeout') || lc.includes('storage locked')) {
+    normalized.code = 'STORAGE_LOCKED';
+    normalized.retryable = true;
+    normalized.severity = S.WARNING;
+    return normalized;
   }
 
-  if (rawCode === 'IMPORT_VALIDATION_FAILED' || rawCode === 'VALIDATION_FAILED' || msg.toLowerCase().includes('import')) {
-    return { code: 'INVALID_IMPORT', message: msg, correlationId, retryable: false, severity: 'warning', timestamp: ts };
+  if (rawCode === 'IMPORT_VALIDATION_FAILED' || rawCode === 'VALIDATION_FAILED' || lc.includes('import')) {
+    normalized.code = 'INVALID_IMPORT';
+    normalized.retryable = false;
+    normalized.severity = S.WARNING;
+    return normalized;
   }
 
   // network / transient
-  if (rawCode === 'ETIMEDOUT' || rawCode === 'ECONNRESET' || msg.toLowerCase().includes('network') || msg.toLowerCase().includes('timeout')) {
-    return { code: 'NETWORK_ERROR', message: msg, correlationId, retryable: true, severity: 'warning', timestamp: ts };
+  if (rawCode === 'ETIMEDOUT' || rawCode === 'ECONNRESET' || lc.includes('network') || lc.includes('timeout')) {
+    normalized.code = 'NETWORK_ERROR';
+    normalized.retryable = true;
+    normalized.severity = S.WARNING;
+    return normalized;
   }
 
-  // fallback
-  return { code: 'UNKNOWN_ERROR', message: msg, correlationId, retryable: false, severity: 'critical', timestamp: ts };
+  // adapter explicit codes
+  if (rawCode === 'FIREBASE_PATCH_CONFLICT') {
+    normalized.code = 'FIREBASE_PATCH_CONFLICT';
+    normalized.retryable = true;
+    normalized.severity = S.WARNING;
+    return normalized;
+  }
+
+  // default fallback: keep original message but safe shape
+  normalized.code = normalized.code || 'UNKNOWN_ERROR';
+  normalized.severity = normalized.severity || S.ERROR;
+  normalized.timestamp = ts;
+  // include a small snippet of original stack for diagnostics but avoid leaking sensitive info
+  try {
+    if (err && err.stack) normalized.originalStack = String(err.stack).split('\n').slice(0,3).join('\n');
+  } catch(e) {}
+
+  return normalized;
 }
 
 async function safeExecuteOperation(operation, args) {

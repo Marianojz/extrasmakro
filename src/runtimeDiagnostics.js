@@ -1,5 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import storeWrapper from './storage/index.js';
+import * as Analytics from './analytics.js';
 
 // getEnvironmentDiagnostics: runtime environment summary for staging
 export function getEnvironmentDiagnostics() {
@@ -52,7 +53,56 @@ export function getEnvironmentDiagnostics() {
   return result;
 }
 
-// attach to runtime global if present
-try { if (typeof window !== 'undefined') { window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {}; window.__HX_RUNTIME__.getEnvironmentDiagnostics = getEnvironmentDiagnostics; } } catch (e) { /* ignore */ }
+export function getProductionReadinessSummary() {
+  const rt = typeof window !== 'undefined' && window.__HX_RUNTIME__ ? window.__HX_RUNTIME__ : {};
+  const ops = rt.operationsCount || 0;
+  const retries = rt.retriesCount || 0;
+  const retryRate = ops > 0 ? (retries / ops) : 0;
+  const conflicts = rt.conflictsCount || 0;
+  const conflictRate = ops > 0 ? (conflicts / ops) : 0;
 
-export default { getEnvironmentDiagnostics };
+  const events = Array.isArray(rt.events) ? rt.events.slice(-200) : [];
+  const degradedCount = events.filter(e => {
+    const s = String((e && (e.type || e.msg)) || '').toUpperCase();
+    return /DEGRADED|AUTO_FALLBACK|STORAGE_AUTO_FALLBACK|FIREBASE_AUTH_FAILED|DEGRADED_MODE|STORAGE_WARNING/.test(s);
+  }).length;
+  const degradedFrequency = events.length ? (degradedCount / events.length) : 0;
+
+  const authDiag = rt.authDiagnostics || {};
+  const storageDiag = rt.storage || rt.storageDiagnostics || {};
+  const fbDiag = rt.firebaseDiagnostics || {};
+
+  // simple weighted readiness score (0-100)
+  let penalty = 0;
+  penalty += Math.min(30, retryRate * 100 * 0.4); // retries penalized up to 30
+  penalty += Math.min(30, conflictRate * 100 * 0.6); // conflicts up to 30
+  penalty += Math.min(20, degradedFrequency * 100 * 0.5); // degraded up to 20
+  if (authDiag.degradedAuth) penalty += 10;
+  if (storageDiag.degraded) penalty += 10;
+  if (fbDiag.degraded) penalty += 10;
+
+  const readinessScore = Math.max(0, Math.round(100 - penalty));
+
+  const summary = {
+    timestamp: new Date().toISOString(),
+    operationsCount: ops,
+    retriesCount: retries,
+    retryRate: Number((retryRate * 100).toFixed(2)), // percent
+    conflictsCount: conflicts,
+    conflictRate: Number((conflictRate * 100).toFixed(2)),
+    degradedFrequency: Number(degradedFrequency.toFixed(4)),
+    authStability: { degradedAuth: !!authDiag.degradedAuth, authRetries: authDiag.authRetries || 0 },
+    storageHealth: { degraded: !!storageDiag.degraded, adapter: rt.storage && rt.storage.activeAdapter ? rt.storage.activeAdapter : (rt.storage && rt.storage.activeAdapter) || null },
+    firebaseHealth: { degraded: !!fbDiag.degraded, lastConflict: fbDiag.lastConflictSample || null },
+    readinessScore,
+    raw: { authDiag, storageDiag, fbDiag },
+  };
+
+  try { if (!window.__HX_RUNTIME__) window.__HX_RUNTIME__ = {}; window.__HX_RUNTIME__.productionReadiness = summary; } catch (e) {}
+  return summary;
+}
+
+// attach to runtime global if present
+try { if (typeof window !== 'undefined') { window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {}; window.__HX_RUNTIME__.getEnvironmentDiagnostics = getEnvironmentDiagnostics; window.__HX_RUNTIME__.getProductionReadinessSummary = getProductionReadinessSummary; window.__HX_RUNTIME__.analytics = Analytics; } } catch (e) { /* ignore */ }
+
+export default { getEnvironmentDiagnostics, getProductionReadinessSummary };

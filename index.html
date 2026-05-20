@@ -16,6 +16,7 @@
           media="print" onload="this.media='all'" />
 
     <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/supervisor.css" />
     <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
   </head>
   <body>
@@ -64,6 +65,11 @@
 
     <!-- SheetJS: parseo de archivos XLS / XLSX -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Feature flags (lite) and build metadata (injected at release time) -->
+    <script src="/public/feature-flags.js"></script>
+    <script src="/public/build-metadata.js"></script>
+
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>
