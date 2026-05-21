@@ -208,12 +208,17 @@ function toast(msg, type = 'info', ms = 3800) {
   if (existing.length >= 3) {
     try { existing[0].remove(); } catch (e) { /* ignore */ }
   }
-  const t = el('div', { class: `toast toast-${type}` }, msg);
+  const icons = { info: 'ℹ️', success: '✓', error: '✖️', warning: '⚠️' };
+  const ico = icons[type] || icons.info;
+  const t = el('div', { class: `toast toast-${type}` },
+    el('div', { class: 'toast-ico', 'aria-hidden': 'true' }, ico),
+    el('div', { class: 'toast-body' }, typeof msg === 'string' ? el('div', {}, msg) : msg)
+  );
   container.appendChild(t);
   requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => {
     t.classList.remove('show');
-    setTimeout(() => t.remove(), 350);
+    setTimeout(() => t.remove(), 260);
   }, ms);
 }
 
@@ -626,6 +631,21 @@ async function mountUI() {
         el('button', { class: 'btn btn-secondary', onclick: () => switchTab('dashboard'), title: 'Abrir dashboard' }, '📈 Dashboard'),
         el('button', { id: 'debug-toggle-header', class: 'btn btn-secondary', onclick: () => { try { window.__HX_TOGGLE_DEBUG_PANEL__?.(); } catch(e){} }, title: 'Debug Panel (supervisor)' }, '🛠 Debug')
       ),
+
+      /* Operational Command Bar: compact, grouped quick actions */
+      el('div', { id: 'op-command-bar', class: 'op-command-bar' },
+        el('div', { class: 'op-cmd-group' },
+          el('button', { class: 'op-cmd-btn primary', onclick: () => { switchTab('convocatorias'); }, title: 'Nueva convocatoria' }, '＋ Convocar'),
+          el('button', { class: 'op-cmd-btn', onclick: () => { showModal('Registrar intento', el('div', { html: '<p>Registrar intento rápido</p>' })); }, title: 'Registrar intento' }, '📞 Intento'),
+          el('button', { class: 'op-cmd-btn', onclick: () => { showModal('Registrar falta', el('div', { html: '<p>Registrar falta rápida</p>' })); }, title: 'Registrar falta' }, '❌ Falta')
+        ),
+        el('div', { class: 'op-cmd-group' },
+          el('button', { class: 'op-cmd-btn', onclick: () => switchTab('estadisticas'), title: 'Ranking' }, '🏆'),
+          el('button', { class: 'op-cmd-btn', onclick: () => switchTab('sabados'), title: 'Sábados' }, '📅'),
+          el('button', { class: 'op-cmd-btn', onclick: () => { const b = new Blob([JSON.stringify({ exported: 'data' })], { type: 'application/json' }); downloadBlob(b, 'export.json'); }, title: 'Exportar' }, '⤓')
+        )
+      ),
+
       el('button', { id: 'view-toggle-btn', class: 'view-toggle-btn', onclick: () => toggleMobileMode() }, '📱 Vista Móvil'),
       featureOn('explainMode') ? el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF') : null,
       el('span', { id: 'app-version', class: 'muted small' }, 'v' + (APP_CONFIG.APP_VERSION || '—'), createInfoIcon('Versión de la aplicación'))
