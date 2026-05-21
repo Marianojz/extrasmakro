@@ -203,6 +203,14 @@ function initStickyHeader() {
 function toast(msg, type = 'info', ms = 3800) {
   const container = $id('toast-container');
   if (!container) return;
+
+  // Ensure accessible container semantics (idempotent)
+  try {
+    if (!container.hasAttribute('role')) container.setAttribute('role', 'status');
+    if (!container.hasAttribute('aria-live')) container.setAttribute('aria-live', 'polite');
+    if (!container.hasAttribute('aria-atomic')) container.setAttribute('aria-atomic', 'true');
+  } catch (e) { /* ignore DOM exceptions */ }
+
   // protect against toast flooding: keep max 3 visible, remove oldest if exceeding
   const existing = Array.from(container.querySelectorAll('.toast'));
   if (existing.length >= 3) {
@@ -210,7 +218,7 @@ function toast(msg, type = 'info', ms = 3800) {
   }
   const icons = { info: 'ℹ️', success: '✓', error: '✖️', warning: '⚠️' };
   const ico = icons[type] || icons.info;
-  const t = el('div', { class: `toast toast-${type}` },
+  const t = el('div', { class: `toast toast-${type}`, role: 'status' },
     el('div', { class: 'toast-ico', 'aria-hidden': 'true' }, ico),
     el('div', { class: 'toast-body' }, typeof msg === 'string' ? el('div', {}, msg) : msg)
   );
