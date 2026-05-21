@@ -9,14 +9,20 @@ window.__HX_BUILD__ = {
   releaseChannel: "staging"
 };
 
-// Helper: expose a short summary function
-window.__HX_BUILD__.toString = function() {
-  return `${this.version} (${this.releaseChannel}) @ ${this.commitHash} — ${this.buildDate}`;
-};
+// Helper: expose a short summary string (serializable)
+window.__HX_BUILD__.summary = `${window.__HX_BUILD__.version} (${window.__HX_BUILD__.releaseChannel}) @ ${window.__HX_BUILD__.commitHash} — ${window.__HX_BUILD__.buildDate}`;
 
 // Surface in startup logs and runtime telemetry
 try {
-  console.info('[startup] __HX_BUILD__', window.__HX_BUILD__.toString());
+  console.info('[startup] __HX_BUILD__', window.__HX_BUILD__.summary);
   window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {};
-  window.__HX_RUNTIME__.build = window.__HX_BUILD__;
+  // assign only serializable build metadata to runtime (avoid functions)
+  window.__HX_RUNTIME__.build = {
+    version: window.__HX_BUILD__.version,
+    buildDate: window.__HX_BUILD__.buildDate,
+    environment: window.__HX_BUILD__.environment,
+    commitHash: window.__HX_BUILD__.commitHash,
+    releaseChannel: window.__HX_BUILD__.releaseChannel,
+    summary: window.__HX_BUILD__.summary
+  };
 } catch (e) { /* ignore in older browsers */ }

@@ -8,5 +8,4 @@ window.__HX_FLAGS__ = {
   forecastWarnings: false
 };
 
-// Convenience API
-window.__HX_FLAGS__.isEnabled = function(flag) { return !!this[flag]; };
+// Note: do not attach functions to global flags — use src/config/features.js helpers for checks.
