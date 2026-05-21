@@ -625,9 +625,9 @@ async function mountUI() {
       // User / auth quick info
       el('div', { id: 'user-info', class: 'user-info' },
         el('span', { id: 'user-display', class: 'muted small' }, 'No autenticado'),
-        el('div', { id: 'auth-actions', style: 'display:inline-block;margin-left:8px' },
+        el('div', { id: 'auth-actions', class: 'auth-actions' },
           el('button', { id: 'btn-login', class: 'btn btn-sm', title: 'Iniciar sesión' }, 'Iniciar sesión'),
-          el('button', { id: 'btn-logout', class: 'btn btn-sm', title: 'Cerrar sesión', style: 'margin-left:6px' }, 'Cerrar sesión')
+          el('button', { id: 'btn-logout', class: 'btn btn-sm ml-sm', title: 'Cerrar sesión' }, 'Cerrar sesión')
         )
       ),
       el('div', { id: 'shift-indicator', class: 'shift-badge' }),
@@ -1048,7 +1048,7 @@ async function renderWeekPlanner() {
     }
   }, '✗ Limpiar semana');
 
-  const toolbar = el('div', { class: 'toolbar', style: 'margin-bottom:12px' },
+  const toolbar = el('div', { class: 'toolbar mb-md' },
     filterSel, btnMarkAll, btnClear
   );
 
@@ -1073,7 +1073,7 @@ async function renderWeekPlanner() {
     tbody.innerHTML = '';
     const toShow = planFilter ? emps.filter(e => e.turno_base === planFilter) : emps;
     if (!toShow.length) {
-      tbody.appendChild(el('tr', {}, el('td', { colspan: '10', class: 'muted', style: 'text-align:center;padding:20px' }, 'Sin empleados activos.')));
+      tbody.appendChild(el('tr', {}, el('td', { colspan: '10', class: 'muted empty-row' }, 'Sin empleados activos.')));
       return;
     }
     for (const emp of toShow) {
@@ -1130,7 +1130,7 @@ async function renderWeekPlanner() {
 
   // ── Resumen ──
   const dispCount = Object.values(editableMap).filter(v => v.disponible).length;
-  const summary = el('p', { class: 'muted', style: 'margin-top:10px;font-size:12px' },
+  const summary = el('p', { class: 'muted muted-small mt-sm' },
     `${dispCount} empleado(s) marcados disponibles para esta semana de ${allEmps.length} activos.`
   );
 
@@ -1167,7 +1167,7 @@ async function renderWeekPlanner() {
     el('h2', { class: 'section-title' }, '📋 Planificación Semanal'),
     el('p', { class: 'section-desc' }, 'Marcá quién hace horas extras esta semana y en qué días se lo puede convocar. La selección es por semana y se limpia automáticamente.'),
     weekNav,
-    el('div', { class: 'card', style: 'margin-top:14px' },
+    el('div', { class: 'card mt-md' },
       toolbar,
       el('div', { class: 'table-scroll' }, tbl),
       summary
@@ -1184,12 +1184,12 @@ function openAddEmployeeModal() {
     el('option', { value: 'eventual_especial' }, 'Eventual especial')
   );
 
-  const antContainer = el('div', { id: 'fe-ant-container', style: 'display:none' },
+  const antContainer = el('div', { id: 'fe-ant-container', class: 'hidden' },
     formField('Antigüedad (meses)', el('input', { id: 'fe-ant-m', type: 'number', class: 'input-full', value: '0', min: '0', placeholder: 'Meses' })),
     formField('Antigüedad (años)', el('input', { id: 'fe-ant-y', type: 'number', class: 'input-full', value: '0', min: '0', placeholder: 'Años' }))
   );
 
-  const fechaContainer = el('div', { id: 'fe-fecha-container', style: 'display:none' },
+  const fechaContainer = el('div', { id: 'fe-fecha-container', class: 'hidden' },
     formField('Fecha fin contrato', el('input', { id: 'fe-fecha-fin', type: 'date', class: 'input-full' }))
   );
 
@@ -2157,7 +2157,7 @@ async function renderNightShiftPanel() {
   const sectorsBadges = el('div', {}, ...(ev.sectores_activados || []).map(s => el('span', { class: 'badge badge-muted badge-gap' }, s)));
 
   const headerInfo = el('div', { class: 'card' },
-    el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap' },
+    el('div', { class: 'flex-row space-between flex-wrap' },
       el('div', {}, sectorsBadges),
       el('div', { style: 'text-align:right' }, el('div', {}, el('strong', {}, 'Supervisor: '), ' ' + supName), stateBadge)
     )
@@ -3564,7 +3564,7 @@ function doImportJson() {
           const body = el('div', {},
             el('p', {}, 'Importación finalizada. Resumen:'),
             el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' },
-              el('div', { style: 'min-width:180px' }, infoRow('Entidades agregadas', addedCount)),
+              el('div', { class: 'min-w-180' }, infoRow('Entidades agregadas', addedCount)),
               el('div', { style: 'min-width:180px' }, infoRow('Entidades ignoradas', ignoredCount)),
               el('div', { style: 'min-width:180px' }, infoRow('Conflictos', conflictsCount)),
               el('div', { style: 'min-width:180px' }, infoRow('Audit logs añadidos', auditAppendedCount))
@@ -3639,8 +3639,8 @@ function openPrintableReport() {
       el('option', { value: 'eventual_simple' }, 'Eventual simple'),
       el('option', { value: 'eventual_comun' }, 'Eventual común')
     )),
-    formField('', el('label', { style: 'display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500' },
-      el('input', { id: 'report-activos', type: 'checkbox', checked: true, style: 'width:16px;height:16px;flex-shrink:0' }),
+    formField('', el('label', { class: 'label-inline' },
+      el('input', { id: 'report-activos', type: 'checkbox', checked: true, class: 'chk-sm' },
       'Solo empleados activos'
     ))
   );

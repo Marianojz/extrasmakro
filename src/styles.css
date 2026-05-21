@@ -719,6 +719,28 @@ input[type="text"], select, textarea { background: rgba(255,255,255,0.02) !impor
 /* Supervisor-specific badge (class-based replacement for inline styles) */
 .badge-supervisor { background: #e6f0ff; color: #0b6efd; padding: 4px 8px; border-radius: 8px; font-weight: 700; display: inline-flex; align-items: center; }
 
+/* Small layout utility classes (safe, tokenized) */
+.auth-actions { display: inline-block; margin-left: var(--space-sm); }
+.ml-sm { margin-left: var(--space-sm) !important; }
+.mb-md { margin-bottom: var(--space-md) !important; }
+.mt-sm { margin-top: var(--space-sm) !important; }
+.mt-md { margin-top: var(--space-md) !important; }
+
+.hidden { display: none !important; }
+
+.flex-row { display:flex; align-items:center; gap: var(--space-sm); }
+.space-between { justify-content: space-between; }
+.flex-wrap { flex-wrap: wrap; }
+
+.min-w-180 { min-width: 180px; }
+
+.empty-row { text-align: center; padding: 20px; }
+.muted-small { margin-top: var(--space-sm); font-size: 12px; }
+
+.code-block { white-space: pre-wrap; max-height: 300px; overflow: auto; background: #f7f7f7; padding: 8px; border-radius: 4px; }
+.label-inline { display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; }
+.chk-sm { width:16px; height:16px; flex-shrink:0; }
+
 /* Legacy badge variants removed to avoid visual drift. */
 
 /* Confiabilidad badge */
