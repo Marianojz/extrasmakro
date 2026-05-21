@@ -858,7 +858,7 @@ async function renderEmployees() {
         el('div', { class: 'emp-card-header' },
           el('h3', { class: 'emp-name' },
             e.name || '(sin nombre)',
-            e.is_supervisor ? el('span', { class: 'badge-supervisor', style: 'margin-left:8px;font-size:11px' }, 'Supervisor') : null
+            e.is_supervisor ? el('span', { class: 'badge-supervisor badge-meta' }, 'Supervisor') : null
           ),
           el('div', { class: 'mono emp-id' }, e.id)
         ),
@@ -929,7 +929,7 @@ async function renderEmployees() {
     })();
     const tr = el('tr', {},
       el('td', { class: 'mono' }, e.id),
-      el('td', { class: 'bold' }, e.name || '(sin nombre)', e.is_supervisor ? el('span', { class: 'badge-supervisor', style: 'margin-left:8px;font-size:11px' }, 'Supervisor') : null),
+      el('td', { class: 'bold' }, e.name || '(sin nombre)', e.is_supervisor ? el('span', { class: 'badge-supervisor badge-meta' }, 'Supervisor') : null),
       el('td', {}, e.turno_base),
       el('td', {}, el('span', { class: 'badge badge-type' }, e.tipo)),
       featureOn('reputationSystem') ? el('td', {}, renderReputationBadge(e.reputation)) : null,
@@ -1001,8 +1001,8 @@ async function renderWeekPlanner() {
     }, '‹ Anterior'),
     el('span', { class: 'week-nav-label' + (isCurrentWeek ? ' week-current' : isFuture ? ' week-future' : ' week-past') },
       weekLabel,
-      isCurrentWeek ? el('span', { class: 'badge badge-success', style: 'margin-left:8px;font-size:10px' }, 'Semana actual') : el('span', {}),
-      isFuture ? el('span', { class: 'badge badge-warning', style: 'margin-left:8px;font-size:10px' }, 'Próxima') : el('span', {})
+      isCurrentWeek ? el('span', { class: 'badge badge-success badge-meta-sm' }, 'Semana actual') : el('span', {}),
+      isFuture ? el('span', { class: 'badge badge-warning badge-meta-sm' }, 'Próxima') : el('span', {})
     ),
     el('button', {
       class: 'btn btn-secondary btn-sm', onclick: async () => {
@@ -2154,7 +2154,7 @@ async function renderNightShiftPanel() {
   // State badge and supervisor info
   const stateBadge = ev.estado === 'cerrado' ? el('span', { class: 'badge badge-success' }, 'CERRADO') : el('span', { class: 'badge badge-warning' }, 'PLANIFICADO');
   const supName = ev.supervisor_id ? (state.employees[ev.supervisor_id]?.name || ev.supervisor_id) : '—';
-  const sectorsBadges = el('div', {}, ...(ev.sectores_activados || []).map(s => el('span', { class: 'badge badge-muted', style: 'margin-right:6px' }, s)));
+  const sectorsBadges = el('div', {}, ...(ev.sectores_activados || []).map(s => el('span', { class: 'badge badge-muted badge-gap' }, s)));
 
   const headerInfo = el('div', { class: 'card' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap' },
@@ -2212,7 +2212,7 @@ async function renderNightShiftPanel() {
       actionsCell.appendChild(delBtn);
     }
 
-    const supBadge = isSup ? el('span', { class: 'badge', style: 'background:#e6f0ff;color:#0b6efd;margin-right:6px;padding:4px 8px;border-radius:8px;font-weight:700' }, 'Supervisor') : null;
+    const supBadge = isSup ? el('span', { class: 'badge badge-supervisor badge-gap' }, 'Supervisor') : null;
 
     // Defensive role display (never empty)
     const roleCell = el('td', {}, p.funcion || '-');

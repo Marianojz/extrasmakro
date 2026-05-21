@@ -710,6 +710,15 @@ input[type="text"], select, textarea { background: rgba(255,255,255,0.02) !impor
 .ranking-card:nth-child(-n+3) { box-shadow: 0 10px 30px rgba(11,110,253,0.06); border:1px solid rgba(11,110,253,0.04); }
 
 /* Badges and states consolidated above — see unified tokenized badge definitions (no duplicates) */
+
+/* Helper utility classes for inline-to-class migration */
+.badge-gap { margin-right: 6px; }
+.badge-meta { margin-left: 8px; font-size: 11px; }
+.badge-meta-sm { margin-left: 8px; font-size: 10px; }
+
+/* Supervisor-specific badge (class-based replacement for inline styles) */
+.badge-supervisor { background: #e6f0ff; color: #0b6efd; padding: 4px 8px; border-radius: 8px; font-weight: 700; display: inline-flex; align-items: center; }
+
 /* Legacy badge variants removed to avoid visual drift. */
 
 /* Confiabilidad badge */
