@@ -91,7 +91,7 @@ function renderReputationBadge(value, title = '') {
   const props = { class: `rep-score ${repClass}`, 'data-rep': String(reputation) };
   if (title) props.title = title;
   return el('span', props,
-    el('span', { class: 'rep-bar', style: 'width:' + String(reputation) + '%' }, ''),
+    el('span', { class: 'rep-bar', 'data-rep': String(reputation) }, ''),
     el('span', { class: 'rep-num' }, String(reputation))
   );
 }
@@ -131,10 +131,32 @@ async function getDiasDisponiblesEmpleado(empOrId, weekKey = null, avMap = null)
 }
 
 // ─── Helpers: microexplicaciones / iconos ───────────────────────────────────
-function createInfoIcon(text) {
-  const s = el('span', { class: 'info-ico', title: text }, 'ℹ️');
-  return s;
+function createIcon(name, title = '') {
+  // lightweight inline SVG icon system (progressive replacement of emojis)
+  const icons = {
+    info: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M11.25 10h1.5v5.25h-1.5V10zM12 7.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/></svg>',
+    check: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    cross: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warn: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="1.2" fill="currentColor"/></svg>',
+    home: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11.5L12 4l9 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 21V12h14v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    calendar: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M16 3v4M8 3v4M3 11h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    chart: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3v18h18" stroke="currentColor" stroke-width="1.5"/><path d="M7 13v5M12 8v10M17 3v15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    user: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/></svg>',
+    gear: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.4 15a1.7 1.7 0 00.34 1.82l.06.06a1 1 0 01-1.41 1.42l-.06-.06a1.7 1.7 0 00-1.82-.34 1.7 1.7 0 00-1 1.56V21a1 1 0 01-2 0v-.2a1.7 1.7 0 00-1-1.56 1.7 1.7 0 00-1.82.34l-.06.06A1 1 0 013.8 16.88l.06-.06A1.7 1.7 0 004.2 15a1.7 1.7 0 00-1.56-1H2a1 1 0 010-2h.64A1.7 1.7 0 004.2 10a1.7 1.7 0 00-.34-1.82L4 8.12A1 1 0 015.45 6.7l.06.06A1.7 1.7 0 007.33 6a1.7 1.7 0 001.56-1V4a1 1 0 012 0v.2c.22.65.79 1.16 1.45 1.16.66 0 1.23-.51 1.45-1.16V4a1 1 0 012 0v.2c.22.65.79 1.16 1.45 1.16.66 0 1.23-.51 1.45-1.16V4a1 1 0 012 0v.2c0 .66.48 1.2 1.12 1.28" stroke="currentColor" stroke-width="1.2"/></svg>',
+    trophy: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 3h8v2a4 4 0 01-4 4 4 4 0 01-4-4V3z" stroke="currentColor" stroke-width="1.5"/><path d="M3 8v2a6 6 0 006 6h6a6 6 0 006-6V8" stroke="currentColor" stroke-width="1.5"/><path d="M8 21h8" stroke="currentColor" stroke-width="1.5"/></svg>',
+    medal1: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="9" r="4" stroke="currentColor" stroke-width="1.2" fill="currentColor"/><path d="M8 14l-2 6h12l-2-6" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>',
+    medal2: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="9" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 14l-2 6h12l-2-6" stroke="currentColor" stroke-width="1.2" fill="currentColor" opacity="0.9"/></svg>',
+    medal3: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="9" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 14l-2 6h12l-2-6" stroke="currentColor" stroke-width="1.2" fill="currentColor" opacity="0.6"/></svg>',
+    clock: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    money: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 9v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 8h4M10 16h4" stroke="currentColor" stroke-width="1.0" stroke-linecap="round"/></svg>',
+    star: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l2.6 6.8L21 10l-5 3.7L17.2 22 12 18.6 6.8 22 8 13.7 3 10l6.4-1.2L12 2z" stroke="currentColor" stroke-width="0.6" fill="currentColor"/></svg>',
+    moon: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" stroke="currentColor" stroke-width="1.0" fill="currentColor"/></svg>'
+  };
+  const markup = icons[name] || icons.info || 'ℹ️';
+  const span = el('span', { class: 'info-ico hx-ico-wrap', title: title, html: markup });
+  return span;
 }
+function createInfoIcon(text) { return createIcon('info', text); }
 
 function setExplainMode(val) {
   const enabled = featureOn('explainMode') && !!val;
@@ -163,37 +185,29 @@ function initStickyHeader() {
   const topEl = document.querySelector('.top-container');
   const sectionsEl = document.querySelector('.tab-sections');
   if (!topEl || !sectionsEl) return;
-  // apply sticky to the unified top container
-  topEl.style.position = 'sticky';
-  topEl.style.top = '0';
-  topEl.style.zIndex = '1000';
+  // apply sticky via class to avoid inline styles
+  topEl.classList.add('top-sticky');
 
-  // ensure bottom orange line remains attached
+  // ensure bottom orange line uses absolute class if present
   const bottomLine = topEl.querySelector('.app-header-bottom-line');
-  if (bottomLine) {
-    bottomLine.style.position = 'absolute';
-    bottomLine.style.left = '0';
-    bottomLine.style.right = '0';
-    bottomLine.style.bottom = '0';
-    bottomLine.style.height = bottomLine.style.height || '3px';
-  }
+  if (bottomLine) bottomLine.classList.add('absolute');
 
   const computeOffset = () => {
     const headerH = topEl.offsetHeight;
-    // Reduce excessive space: if header height is large (>=32px)
-    // use a compact offset (16px) to avoid a big gap below the sticky area.
-    // Otherwise keep the natural header height. Never use 0.
-    const offset = headerH >= 32 ? 16 : Math.max(12, headerH);
-    sectionsEl.style.marginTop = offset + 'px';
+    // toggle compact offset class instead of writing inline styles
+    if (headerH >= 32) {
+      topEl.classList.add('header-compact');
+      sectionsEl.classList.add('sections-offset-compact');
+    } else {
+      topEl.classList.remove('header-compact');
+      sectionsEl.classList.remove('sections-offset-compact');
+    }
   };
   computeOffset();
   window.addEventListener('resize', computeOffset);
 
   // shadow toggling on scroll for the whole top container
-  const onScroll = () => {
-    if (window.scrollY > 10) topEl.classList.add('scrolled');
-    else topEl.classList.remove('scrolled');
-  };
+  const onScroll = () => topEl.classList.toggle('scrolled', window.scrollY > 10);
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 }
@@ -216,10 +230,11 @@ function toast(msg, type = 'info', ms = 3800) {
   if (existing.length >= 3) {
     try { existing[0].remove(); } catch (e) { /* ignore */ }
   }
-  const icons = { info: 'ℹ️', success: '✓', error: '✖️', warning: '⚠️' };
-  const ico = icons[type] || icons.info;
+  // use lightweight icon system
+  const iconMap = { info: 'info', success: 'check', error: 'cross', warning: 'warn' };
+  const icoNode = createIcon(iconMap[type] || 'info');
   const t = el('div', { class: `toast toast-${type}`, role: 'status' },
-    el('div', { class: 'toast-ico', 'aria-hidden': 'true' }, ico),
+    icoNode,
     el('div', { class: 'toast-body' }, typeof msg === 'string' ? el('div', {}, msg) : msg)
   );
   container.appendChild(t);
@@ -251,8 +266,15 @@ function showModal(title, bodyNode, buttons = []) {
 }
 
 function closeModal() {
-  $id('modal_backdrop')?.remove();
+  const bd = $id('modal_backdrop');
+  if (!bd) return;
+  // play closing animation when available, then remove
+  try {
+    bd.classList.add('closing');
+    setTimeout(() => { bd.remove(); }, 180);
+  } catch (e) { bd.remove(); }
 }
+
 
 // ─── Confirmación con modal ───────────────────────────────────────────────────
 
@@ -354,13 +376,28 @@ function initMobileMode() {
   });
 }
 
+function applyDynamicVisuals() {
+  // centralized small dynamic style application (keeps inline style use in one place)
+  try {
+    document.querySelectorAll('.rep-score[data-rep]').forEach(elm => {
+      const val = Number(elm.getAttribute('data-rep')) || 0;
+      const bar = elm.querySelector('.rep-bar');
+      if (bar) bar.style.width = String(Math.max(0, Math.min(100, val))) + '%';
+    });
+  } catch (e) { /* noop */ }
+}
+
+// ensure dynamic visuals are applied after load and on resize
+try { document.addEventListener('DOMContentLoaded', applyDynamicVisuals); } catch (e) {}
+try { window.addEventListener('resize', applyDynamicVisuals); } catch (e) {}
+
 function buildMobileBottomNav() {
   const MOB_TABS = [
-    { tab: 'semana',       icon: '🏠', label: 'Semana'    },
-    { tab: 'sabados',      icon: '📅', label: 'Sábado'    },
-    { tab: 'estadisticas', icon: '📊', label: 'Ranking'   },
-    { tab: 'empleados',    icon: '👤', label: 'Empleados' },
-    { tab: 'config',       icon: '⚙',  label: 'Ajustes'   },
+    { tab: 'semana',       icon: 'home', label: 'Semana'    },
+    { tab: 'sabados',      icon: 'calendar', label: 'Sábado'    },
+    { tab: 'estadisticas', icon: 'chart', label: 'Ranking'   },
+    { tab: 'empleados',    icon: 'user', label: 'Empleados' },
+    { tab: 'config',       icon: 'gear',  label: 'Ajustes'   },
   ];
   const inner = el('div', { class: 'mobile-bottom-nav-inner' });
   for (const t of MOB_TABS) {
@@ -368,8 +405,8 @@ function buildMobileBottomNav() {
       class: 'mob-nav-btn', 'data-tab': t.tab,
       onclick: () => switchTab(t.tab)
     },
-      el('span', { class: 'mob-nav-icon' }, t.icon),
-      t.label
+      createIcon(t.icon, t.label),
+      el('span', { class: 'mob-nav-label' }, t.label)
     ));
   }
   return el('nav', { class: 'mobile-bottom-nav', id: 'mobile-bottom-nav' }, inner);
@@ -377,7 +414,7 @@ function buildMobileBottomNav() {
 
 async function buildMobileHomeQuickActions() {
   const wrap = el('div', {});
-  const rankIcons = ['🥇', '🥈', '🥉'];
+  const rankMedals = ['medal1','medal2','medal3'];
   let miniRanking = null;
   if (featureOn('rankings')) {
     const list = await Models.suggestionList();
@@ -390,7 +427,7 @@ async function buildMobileHomeQuickActions() {
     } else {
       top5.forEach((e, idx) => {
         miniRanking.appendChild(el('div', { class: 'mini-rank-row' },
-          el('span', { class: 'mini-rank-pos' }, rankIcons[idx] || String(idx + 1)),
+          el('span', { class: 'mini-rank-pos' }, createIcon(rankMedals[idx]) || String(idx + 1)),
           el('span', { class: 'mini-rank-name' }, safeText(e.name)),
           el('span', { class: 'mini-rank-score' }, e.__meta.score.toFixed(1), createInfoIcon('Score: combina horas, reputación y confiabilidad.'))
         ));
@@ -703,6 +740,10 @@ async function mountUI() {
   appRoot.appendChild(sections);
   appRoot.appendChild(footer);
   appRoot.appendChild(buildMobileBottomNav());
+
+  // Micro UX: initialize sticky header metrics and mobile mode handling
+  try { initStickyHeader(); } catch (e) { console.warn('initStickyHeader failed', e); }
+  try { initMobileMode(); } catch (e) { console.warn('initMobileMode failed', e); }
 
   switchTab('empleados');
   // Cleanup old empty night events before rendering UI
@@ -1519,7 +1560,7 @@ async function openSimulatorModal(empId) {
   );
   // botón explicativo sobre recovery mensual
   if (featureOn('reputationSystem')) {
-    body.appendChild(el('div', { style: 'margin-top:8px' }, el('button', { class: 'btn btn-xs btn-info', onclick: openRecoveryExplainModal }, 'Ver cómo funciona')));
+    body.appendChild(el('div', { class: 'mt-sm' }, el('button', { class: 'btn btn-xs btn-info', onclick: openRecoveryExplainModal }, 'Ver cómo funciona')));
   }
   showModal('Simulador: ' + safeText(e.name), body, [{ label: 'Cerrar', cls: 'btn btn-primary', action: closeModal }]);
 }
@@ -1859,7 +1900,7 @@ async function renderCallHistory() {
           el('div', { class: 'call-meta muted small' }, emp.puesto || '—', ' · ', c.tipo_extra || '—')
         ),
         el('div', { class: 'call-right' },
-          el('span', { class: `badge ${st.cls}`, style: `background:${st.color};color:#fff;padding:6px 10px;border-radius:14px;font-weight:600;` }, st.label),
+          el('span', { class: `badge ${st.cls} badge-inline` }, st.label),
           el('div', { class: 'call-date muted small' }, c.fecha || c.timestamp || '')
         )
       ),
@@ -1911,10 +1952,10 @@ async function openCallModal(employeeId) {
   // replace the placeholder node (4th child) with proper alert
   if (body.childNodes && body.childNodes[3]) {
     if (!available) {
-      body.childNodes[3].replaceWith(el('div', { class: 'startup-alert startup-alert-warning', style: 'margin-bottom:4px' },
+      body.childNodes[3].replaceWith(el('div', { class: 'startup-alert startup-alert-warning mb-xs', },
         el('span', { class: 'startup-alert-msg' }, '⚠️ Este empleado no está marcado como disponible esta semana. Podes convocarlo igual.')));
     } else {
-      body.childNodes[3].replaceWith(el('div', { class: 'startup-alert', style: 'background:#f0fdf4;border-color:#86efac;color:#166534;margin-bottom:4px' },
+      body.childNodes[3].replaceWith(el('div', { class: 'startup-alert startup-alert-success mb-xs', },
         el('span', { class: 'startup-alert-msg' }, '✅ Disponible esta semana. Días habilitados: ' + ((dias && dias.length) ? dias.join(', ') : 'no especificados'))));
     }
   }
@@ -2136,7 +2177,7 @@ async function renderNightShiftPanel() {
   }
 
   const header = el('div', { class: 'card night-header' },
-    el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px' },
+    el('div', { class: 'flex flex-between gap-md' },
       el('h2', {}, 'TURNO NOCHE — ' + d),
       el('div', {},
         el('button', { class: 'btn btn-secondary', onclick: async () => { await renderNightShiftPanel(); } }, 'Actualizar'),
@@ -2159,7 +2200,7 @@ async function renderNightShiftPanel() {
   const headerInfo = el('div', { class: 'card' },
     el('div', { class: 'flex-row space-between flex-wrap' },
       el('div', {}, sectorsBadges),
-      el('div', { style: 'text-align:right' }, el('div', {}, el('strong', {}, 'Supervisor: '), ' ' + supName), stateBadge)
+      el('div', { class: 'text-right' }, el('div', {}, el('strong', {}, 'Supervisor: '), ' ' + supName), stateBadge)
     )
   );
 
@@ -2358,7 +2399,7 @@ async function renderNightShiftPanel() {
   const existingMobile = document.getElementById(mobileCloseId);
   if (existingMobile) existingMobile.remove();
   if (isMobileMode() && ev.estado !== 'cerrado') {
-    const mobileBar = el('div', { id: mobileCloseId, style: 'position:fixed;left:0;right:0;bottom:0;padding:10px;background:linear-gradient(90deg,#0b5fae,#ff7a00);display:flex;justify-content:center;z-index:999;' },
+    const mobileBar = el('div', { id: mobileCloseId, class: 'mobile-fixed-bar' },
       el('button', { class: 'btn btn-action', onclick: closeAction }, 'CERRAR EVENTO')
     );
     document.body.appendChild(mobileBar);
@@ -2475,11 +2516,11 @@ function openNightPrintable(dateKey) {
     let html = `<h2>Turno Noche — ${ev.fecha}</h2>`;
     html += `<p><strong>Supervisor:</strong> ${ev.supervisor_id ? (empleados[ev.supervisor_id]?.name || ev.supervisor_id) : '—'}</p>`;
     html += `<p><strong>Total remises:</strong> ${remises.length}</p>`;
-    html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%"><thead><tr><th>Empleado</th><th>Remis</th><th>Dirección</th><th>N° Coche</th></tr></thead><tbody>';
+    html += '<table class="table table-compact"><thead><tr><th>Empleado</th><th>Remis</th><th>Dirección</th><th>N° Coche</th></tr></thead><tbody>';
     remises.forEach(p => {
       const name = empleados[p.empleado_id]?.name || p.empleado_id;
       const direccion = p.direccion || '-';
-      html += `<tr><td>${name}</td><td style="text-align:center">SI</td><td>${direccion}</td><td style="text-align:center">[  __  ]</td></tr>`;
+      html += `<tr><td>${name}</td><td class="text-center">SI</td><td>${direccion}</td><td class="text-center">[  __  ]</td></tr>`;
     });
     html += '</tbody></table>';
     const w = window.open('', '_blank');
@@ -2615,7 +2656,7 @@ async function renderSaturdayMobileSteps(cont) {
 
   // Contenido del paso
   const content = el('div', { class: 'card' });
-  content.appendChild(el('h3', { style: 'margin-bottom:12px;font-size:15px;font-weight:700' }, MOBILE_SAT_STEPS[step - 1]));
+  content.appendChild(el('h3', { class: 'modal-title' }, MOBILE_SAT_STEPS[step - 1]));
 
   switch (step) {
     case 1: {
@@ -2666,7 +2707,7 @@ async function renderSaturdayMobileSteps(cont) {
           ));
         });
       }
-      content.appendChild(el('div', { style: 'margin-top:10px' },
+      content.appendChild(el('div', { class: 'mt-md' },
         el('button', { class: 'btn btn-primary btn-sm', onclick: () => openAddAssignmentV12Modal(satMgmtDate, intentions) }, '+ Asignar desde anotados')
       ));
       break;
@@ -2686,10 +2727,10 @@ async function renderSaturdayMobileSteps(cont) {
         });
       }
       if (assigned.length) {
-        content.appendChild(el('p', { class: 'muted', style: 'margin-top:8px' }, 'Pendientes:'));
+        content.appendChild(el('p', { class: 'muted mt-sm' }, 'Pendientes:'));
         assigned.forEach(a => {
           const emp = emps[a.empleado_id];
-          content.appendChild(el('div', { class: 'phase-item', style: 'flex-wrap:wrap;gap:4px' },
+          content.appendChild(el('div', { class: 'phase-item wrap gap-xs' },
             el('span', { class: 'phase-item-name' }, emp ? emp.name : a.empleado_id),
             el('button', { class: 'btn btn-xs btn-success', onclick: () => openRegisterHoursV12(a.id) }, 'Horas'),
             el('button', { class: 'btn btn-xs btn-danger', onclick: () => confirmModal('Registrar falta (-15 pts)', async () => { await Models.registrarFaltaSabado(a.id); renderSaturdayMgmtV12(); }) }, 'Falta')
@@ -2708,7 +2749,7 @@ async function renderSaturdayMobileSteps(cont) {
         const rl = document.getElementById('saturday-ranking-list');
         if (rl && rl.children.length) {
           content.innerHTML = '';
-          content.appendChild(el('h3', { style: 'margin-bottom:12px;font-size:15px;font-weight:700' }, MOBILE_SAT_STEPS[4]));
+          content.appendChild(el('h3', { class: 'modal-title' }, MOBILE_SAT_STEPS[4]));
           Array.from(rl.children).forEach(c => content.appendChild(c.cloneNode(true)));
         }
       }, 300);
@@ -3041,21 +3082,21 @@ async function renderSummaryCards() {
   const total100 = active.reduce((s, e) => s + e.stats.horas_100, 0);
 
   const cards = [
-    { label: 'Empleados activos', value: active.length, icon: '👥' },
-    { label: 'Total horas 50%', value: total50, icon: '⏱' },
-    { label: 'Total horas 100%', value: total100, icon: '⏱' },
+    { label: 'Empleados activos', value: active.length, icon: createIcon('user') },
+    { label: 'Total horas 50%', value: total50, icon: createIcon('clock') },
+    { label: 'Total horas 100%', value: total100, icon: createIcon('clock') },
   ];
   if (featureOn('reputationSystem')) {
     const avgRep = active.length ? (active.reduce((s, e) => s + e.reputation, 0) / active.length).toFixed(1) : '—';
-    cards.push({ label: 'Reputación promedio', value: avgRep + ' / 100', icon: '⭐' });
+    cards.push({ label: 'Reputación promedio', value: avgRep + ' / 100', icon: createIcon('star') });
   }
   // Night shift monthly stats (Turno Noche)
   try {
     const ym = new Date().toISOString().slice(0,7);
     const ns = await Models.getNightShiftMonthlyStats(ym);
-    cards.push({ label: 'Turno Noche: eventos este mes', value: ns.total_eventos || 0, icon: '🌙' });
-    cards.push({ label: 'Turno Noche: hrs 100% pagadas', value: ns.total_horas_100_pagadas || 0, icon: '⏱' });
-    cards.push({ label: 'Turno Noche: costo estimado', value: '$' + (ns.costo_logistico_total || 0), icon: '💲' });
+    cards.push({ label: 'Turno Noche: eventos este mes', value: ns.total_eventos || 0, icon: createIcon('moon') });
+    cards.push({ label: 'Turno Noche: hrs 100% pagadas', value: ns.total_horas_100_pagadas || 0, icon: createIcon('clock') });
+    cards.push({ label: 'Turno Noche: costo estimado', value: '$' + (ns.costo_logistico_total || 0), icon: createIcon('money') });
   } catch (e) { /* non-fatal */ }
   for (const c of cards) {
     cont.appendChild(el('div', { class: 'stat-card' },
@@ -3086,7 +3127,8 @@ async function renderRankingTable() {
   const tbody = el('tbody');
   list.forEach((e, idx) => {
     const m = e.__meta;
-    const topBadge = idx < 3 ? el('span', { class: 'badge badge-top' }, ['🥇', '🥈', '🥉'][idx]) : el('span', {}, String(idx + 1));
+    const medalKeys = ['medal1','medal2','medal3'];
+    const topBadge = idx < 3 ? el('span', { class: 'badge badge-top' }, createIcon(medalKeys[idx])) : el('span', {}, String(idx + 1));
     tbody.appendChild(el('tr', {},
       el('td', {}, topBadge),
       el('td', { class: 'bold' }, e.name),
@@ -3301,7 +3343,7 @@ async function buildShiftConfig() {
         }
       }, 'Guardar')
     ),
-    el('h4', { style: 'margin-top:20px;margin-bottom:8px' }, 'Historial de turnos semanales'),
+    el('h4', { class: 'section-subtitle mt-lg' }, 'Historial de turnos semanales'),
     el('div', { id: 'shift-history' })
   );
   setTimeout(() => renderShiftHistory(), 0);
@@ -3563,14 +3605,14 @@ function doImportJson() {
 
           const body = el('div', {},
             el('p', {}, 'Importación finalizada. Resumen:'),
-            el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' },
+            el('div', { class: 'flex gap-md wrap' },
               el('div', { class: 'min-w-180' }, infoRow('Entidades agregadas', addedCount)),
-              el('div', { style: 'min-width:180px' }, infoRow('Entidades ignoradas', ignoredCount)),
-              el('div', { style: 'min-width:180px' }, infoRow('Conflictos', conflictsCount)),
-              el('div', { style: 'min-width:180px' }, infoRow('Audit logs añadidos', auditAppendedCount))
+              el('div', { class: 'min-w-180' }, infoRow('Entidades ignoradas', ignoredCount)),
+              el('div', { class: 'min-w-180' }, infoRow('Conflictos', conflictsCount)),
+              el('div', { class: 'min-w-180' }, infoRow('Audit logs añadidos', auditAppendedCount))
             ),
-            warnings.length ? el('div', { style: 'margin-top:10px' }, el('h4', {}, 'Advertencias'), el('ul', {}, ...warnings.map(w => el('li', {}, String(w))))) : null,
-            el('div', { style: 'margin-top:12px;display:flex;gap:8px' },
+            warnings.length ? el('div', { class: 'mt-md' }, el('h4', {}, 'Advertencias'), el('ul', {}, ...warnings.map(w => el('li', {}, String(w))))) : null,
+            el('div', { class: 'mt-md flex gap-sm' },
               el('button', { class: 'btn btn-secondary', onclick: closeModal }, 'Cerrar'),
               el('button', { class: 'btn btn-outline', onclick: () => { downloadBlob(new Blob([JSON.stringify(sum, null, 2)], { type: 'application/json' }), makeFilename('import_summary', 'json')); } }, 'Descargar resumen')
             )
@@ -3585,7 +3627,7 @@ function doImportJson() {
           const details = e.details || e.message || 'Estructura inválida.';
           const body = el('div', {},
             el('p', {}, 'El archivo JSON no cumple la estructura requerida. Importación cancelada.'),
-            el('pre', { style: 'white-space:pre-wrap;max-height:300px;overflow:auto;background:#f7f7f7;padding:8px;border-radius:4px' }, safeText(typeof details === 'string' ? details : JSON.stringify(details, null, 2)))
+            el('pre', { class: 'code-block' }, safeText(typeof details === 'string' ? details : JSON.stringify(details, null, 2)))
           );
           showModal('Validación fallida', body, [ { label: 'Cerrar', action: closeModal } ]);
           toast('Importación cancelada: validación fallida.', 'error');
@@ -3593,8 +3635,8 @@ function doImportJson() {
           const details = e.details || e.message || 'Operación destructiva detectada.';
           const body = el('div', {},
             el('p', {}, 'El import fue bloqueado porque intentaría realizar operaciones destructivas (borrado o reemplazo de historial).'),
-            el('pre', { style: 'white-space:pre-wrap;max-height:300px;overflow:auto;background:#f7f7f7;padding:8px;border-radius:4px' }, safeText(typeof details === 'string' ? details : JSON.stringify(details, null, 2))),
-            el('p', { style: 'margin-top:8px' }, 'Verifique el archivo y vuelva a intentar con una versión no destructiva o contacte al administrador.')
+            el('pre', { class: 'code-block' }, safeText(typeof details === 'string' ? details : JSON.stringify(details, null, 2))),
+            el('p', { class: 'mt-sm' }, 'Verifique el archivo y vuelva a intentar con una versión no destructiva o contacte al administrador.')
           );
           showModal('Importación bloqueada', body, [ { label: 'Cerrar', action: closeModal } ]);
           toast('Importación bloqueada: destructiva.', 'error');
@@ -3706,13 +3748,11 @@ async function generatePrintableReport() {
     th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; font-size: 11px; }
     th { background: #f3f4f6; font-weight: 600; }
     tr:nth-child(even) { background: #fafafa; }
-    .inactive { color: #9ca3af; font-style: italic; }
     .badge-turno { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600; }
     .t-m { background:#dbeafe; color:#1d4ed8; }
     .t-t { background:#ffedd5; color:#c2410c; }
     .badge-tipo { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; background:#f3f4f6; }
     .signature-row { display:flex; justify-content:flex-end; gap:60px; margin-top:48px; }
-    .signature-box { text-align:center; width:200px; }
     .signature-line { border-top:1px solid #333; padding-top:6px; margin-top:40px; font-size:10px; color:#666; }
     .footer { margin-top:20px; font-size:10px; color:#aaa; text-align:center;
       border-top:1px solid #eee; padding-top:8px; }
@@ -3732,7 +3772,7 @@ async function generatePrintableReport() {
   </div>
   <div class="report-filters">Filtros aplicados: ${filterDesc}</div>
   ${rows.length === 0
-      ? '<p style="color:#888;font-style:italic">Sin empleados para los filtros seleccionados.</p>'
+      ? '<p class="muted italic">Sin empleados para los filtros seleccionados.</p>'
       : `<table>
     <thead>
       <tr>
@@ -3832,7 +3872,7 @@ async function generateEmployeePrintableReport(id) {
     `<tr>
       <td>${new Date(inc.ts).toLocaleDateString('es-AR')}</td>
       <td>${inc.reason}</td>
-      <td style="text-align:center">${inc.delta}</td>
+      <td class="text-center">${inc.delta}</td>
       <td>${inc.status}</td>
       <td>${inc.descargo?.text || '--'}</td>
     </tr>`
@@ -3887,7 +3927,7 @@ async function generateEmployeePrintableReport(id) {
       <th>Fecha</th><th>Motivo</th><th>Delta rep.</th><th>Estado</th><th>Descargo</th>
     </tr></thead>
     <tbody>${incRows}</tbody>
-  </table>` : '<p style="color:#777">Sin incidentes registrados.</p>'}` : ''}
+  </table>` : '<p class="muted">Sin incidentes registrados.</p>'}` : ''}
   <div class="footer">Generado: ${new Date().toLocaleString()} - Horas Extras V2 (offline)</div>
 </body>
 </html>`;

@@ -381,23 +381,147 @@ a:hover { text-decoration: underline; }
   .app-header-inner { gap: 8px; }
 }
 
+/* ICON & UTILITIES (added for UX lockdown pass) */
+
+/* Final UX Freeze tokens: add centered text helper and small accessibility helpers */
+.text-center { text-align: center; }
+.align-middle { vertical-align: middle; }
+.hx-ico { width: var(--ico-size); height: var(--ico-size); display:inline-block; vertical-align:middle; }
+.hx-ico-wrap { display:inline-flex; align-items:center; justify-content:center; }
+
+
+:root { --ico-size: 18px; --ico-size-sm: 16px; --ico-size-lg: 22px; }
+
+/* Utilities */
+.mt-sm { margin-top: var(--space-sm); }
+.mt-md { margin-top: var(--space-md); }
+.mt-lg { margin-top: var(--space-lg); }
+.mb-xs { margin-bottom: var(--space-xs); }
+.flex { display:flex; }
+.flex-between { display:flex; justify-content:space-between; align-items:center; }
+.flex-center { display:flex; align-items:center; justify-content:center; }
+.wrap { flex-wrap:wrap; }
+.gap-xs { gap:4px; }
+.gap-sm { gap:8px; }
+.gap-md { gap:12px; }
+
+/* Badges */
+.badge-inline { padding: 6px 10px; border-radius: 14px; font-weight:600; color:#fff; display:inline-block; }
+
+/* Mobile fixed bar */
+.mobile-fixed-bar { position:fixed; left:0; right:0; bottom:0; padding:10px; background:linear-gradient(90deg,#0b5fae,#ff7a00); display:flex; justify-content:center; z-index:999; }
+
+/* Reputation bar */
+.rep-score { display:inline-flex; align-items:center; gap:8px; background:var(--badge-muted-bg); padding:4px 8px; border-radius:999px; }
+.rep-bar { height:8px; background:var(--badge-success-bg); border-radius:999px; width:0; transition: width .18s ease; display:block; min-width:60px; }
+.rep-num { font-weight:700; font-size:13px; }
+
+/* Code/preview block */
+.code-block { white-space:pre-wrap; max-height:300px; overflow:auto; background:#f7f7f7; padding:8px; border-radius:4px; }
+
+/* Table density */
+.table-compact th, .table-compact td { padding:6px 8px; font-size:13px; }
+.table-comfortable th, .table-comfortable td { padding:14px 16px; font-size:15px; }
+
+.startup-alert-success { background:#f0fdf4; border-color:#86efac; color:#166534; }
+
+.min-w-180 { min-width:180px; }
+
+.text-right { text-align: right; }
+
+.italic { font-style: italic; }
+
+.inactive { color: #9ca3af; font-style: italic; }
+
 /* ─── Buttons ───────────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 6px 12px;
+  gap: 6px; /* slightly increased for visual breathing */
+  padding: 8px 12px; /* touch-friendly default */
+  min-height: 40px; /* ensure tappable area */
   font-size: 13.0px;
   font-weight: 500;
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background .14s, transform .07s, box-shadow .14s;
+  transition: background var(--transition-medium), transform .07s, box-shadow var(--transition-medium);
   line-height: 1;
   white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Icon alignment within buttons */
+.btn > img, .btn > svg, .btn > .ico { display: inline-block; vertical-align: middle; height: 18px; width: auto; }
+
+/* Small variant keeps compactness */
+.btn-sm { padding:6px 9px; font-size:13px; border-radius:8px; min-height: 34px; }
+
+/* Focus and accessible outlines */
+.btn:focus-visible { outline: 2px solid rgba(37,99,235,0.24); outline-offset: 3px; }
+
+/* Modal: subtle entrance and backdrop */
+.modal-backdrop {
+  position: fixed; inset: 0; display:flex; align-items: center; justify-content: center; z-index: 2000;
+  background: rgba(6,10,20,0.35);
+  animation: hxfadeIn .14s ease both;
+}
+.modal-backdrop.closing { animation: hxfadeOut .12s ease both; }
+.modal {
+  background: #fff; border-radius: var(--radius); max-width: 760px; width: calc(100% - 32px); margin: 18px; box-shadow: var(--shadow-md); transform-origin: center center;
+  animation: hxpopIn .14s cubic-bezier(.2,.9,.3,1) both;
+  transition: transform var(--transition-medium), opacity var(--transition-medium);
+}
+.modal-backdrop.closing .modal { animation: hxpopOut .12s ease both; }
+@keyframes hxpopIn { from { opacity: 0; transform: translateY(6px) scale(.995); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes hxpopOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(6px) scale(.995); } }
+@keyframes hxfadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes hxfadeOut { from { opacity: 1 } to { opacity: 0 } }
+
+/* Toasts: consistent placement and smooth transition */
+.toast-container {
+  position: fixed; right: 18px; bottom: var(--toast-bottom); z-index: 2100; display:flex; flex-direction: column; gap: 8px; align-items: flex-end; max-width: var(--toast-max-width);
+}
+.toast { background: #fff; border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow-md); display:inline-flex; gap:8px; align-items:center; opacity: 0; transform: translateY(6px); transition: opacity var(--transition-medium), transform var(--transition-medium); }
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast .toast-ico { font-size: 16px; }
+
+/* Table precision */
+.table { width: 100%; border-collapse: collapse; border-spacing: 0; font-size:13px; }
+.table th, .table td { padding: 10px 12px; vertical-align: middle; border-bottom: 1px solid var(--border); }
+.table thead th { background: var(--surface-alt); color: #0f172a; font-weight: 600; text-align: left; }
+.table tbody tr:hover { background: #fbfdff; }
+.table-compact th, .table-compact td { padding: 7px 10px; }
+.table .badge { display:inline-flex; align-items:center; gap:6px; padding:var(--badge-padding); border-radius: var(--badge-radius); }
+
+/* Utility: muted / small / mono already used; ensure consistency */
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace; font-size: 12px; }
+
+/* Mobile touch improvements */
+.mob-nav-btn { min-height: 48px; padding: 8px 10px; font-size: 13px; }
+@media (max-width: 640px) {
+  .btn { padding: 10px 14px; }
+  .card { padding: 12px 12px; }
+}
+
+/* Focus helpers for keyboard users */
+:focus { outline: none; }
+:focus-visible { outline: 3px solid rgba(37,99,235,0.14); outline-offset: 2px; }
+
+/* Micro helpers for badges and KPI alignment */
+.kpi .kpi-label { color: var(--muted); font-size: 12px; }
+.kpi .kpi-value { font-size: 18px; font-weight: 700; }
+
+/* Small animation for subtle hover states */
+.card:hover { transform: translateY(-2px); transition: transform var(--transition-medium); }
+
+/* ensure consistent vertical rhythm for headings and paragraphs */
+h1,h2,h3,h4,h5 { line-height: 1.2; margin: 0 0 8px 0; }
+p { margin: 0 0 10px 0; }
+
 .btn:active  { transform: scale(.97); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -743,6 +867,27 @@ input[type="text"], select, textarea { background: rgba(255,255,255,0.02) !impor
 
 /* Legacy badge variants removed to avoid visual drift. */
 
+/* Icon system (lightweight, tokenized) */
+.hx-ico-wrap { display:inline-flex; align-items:center; justify-content:center; line-height:1; vertical-align:middle; }
+.hx-ico--sm { width:14px; height:14px; min-width:14px; min-height:14px; }
+.hx-ico--btn { width:16px; height:16px; margin-right:6px; }
+.btn > .hx-ico, .btn > .hx-ico-wrap { margin-right:8px; display:inline-flex; align-items:center; }
+.mob-nav-icon .hx-ico, .mob-nav-icon { display:inline-flex; margin-right:6px; }
+
+/* Table density system: comfortable vs compact */
+.table-comfortable th, .table-comfortable td, .data-table.table-comfortable th, .data-table.table-comfortable td { padding: 14px 18px; }
+
+/* Sticky header helper classes (replace inline style usage) */
+.top-container.top-sticky { position: sticky; top: 0; z-index: 1000; }
+.app-header-bottom-line.absolute { position: absolute; left:0; right:0; bottom:0; height:3px; }
+.tab-sections.sections-offset-compact { margin-top: 16px; }
+
+/* Ensure inline SVGs size correctly */
+.hx-ico-wrap svg { width: 18px; height: 18px; display:block; }
+.hx-ico { color: inherit; } /* consolidated */
+
+
+
 /* Confiabilidad badge */
 .confiab-badge { background:#eef6ff; color:#0b6efd; padding:4px 8px; border-radius:999px; font-weight:700 }
 
@@ -944,6 +1089,71 @@ input[type="text"], select, textarea { background: rgba(255,255,255,0.02) !impor
 @media (max-width: 640px) { .debug-panel { right: 8px; left: 8px; width: auto; bottom: 12px; max-height: 60vh } }
 
 /* end debug-panel overrides */
+
+/* === UX HARDENING FINAL: normalization overrides ===
+   - Enforce compact radii, reduce heavy shadows, remove expensive backdrop blurs
+   - Normalize table padding and badge/pill sizes
+   - Improve focus-visible for keyboard users
+   - Disable transform-based hover lifts to avoid repaint costs on large tables
+*/
+:root {
+  --transition-fast: .09s;
+  --transition-medium: .14s;
+  --shadow-sm: 0 3px 10px rgba(2,6,23,0.03);
+  --shadow-md: 0 6px 12px rgba(2,6,23,0.04);
+  --radius: 8px;
+  --radius-sm: 6px;
+}
+
+/* Compact, consistent controls */
+.btn, .btn-primary, .btn-secondary, .op-cmd-btn, .page-btn, .mob-nav-btn {
+  border-radius: var(--radius-sm) !important;
+  transition-duration: var(--transition-fast) !important;
+}
+
+/* Soften shadows for performance */
+.card, .stat-card, .ranking-card, .modal, .toast, .debug-panel {
+  box-shadow: var(--shadow-sm) !important;
+}
+
+/* Remove expensive blurs for smoother scroll/paint */
+.modal-backdrop { backdrop-filter: none !important; background: rgba(15,23,42,0.6) !important; }
+.app-header { backdrop-filter: none !important; box-shadow: 0 1px 2px rgba(0,0,0,0.06) !important; }
+
+/* Toast adjustments: lighter shadow, faster motion */
+.toast { box-shadow: 0 6px 18px rgba(2,6,23,0.08) !important; transform: translateY(3px); transition-duration: var(--transition-medium) !important; }
+
+/* Tables: compact and consistent padding */
+.data-table th, .data-table td { padding: 8px 10px !important; border-color: rgba(255,255,255,0.04) !important; }
+
+/* Avoid layout-affecting hover transforms on large lists */
+.table .data-table tbody tr:hover, .data-table tbody tr:hover { transform: none !important; }
+.ranking-card:hover { transform: none !important; box-shadow: var(--shadow-sm) !important; }
+
+/* Improve keyboard focus visibility without large layout shifts */
+:focus { outline: none; }
+:focus-visible { outline: 3px solid rgba(37,99,235,0.18); outline-offset: 2px; border-radius: 6px; }
+
+/* Reduce debug panel dominance */
+.debug-panel { box-shadow: 0 8px 20px rgba(2,6,23,0.12) !important; max-width: 420px; }
+
+/* Mobile bottom nav lighter shadow */
+.mobile-bottom-nav { box-shadow: 0 -4px 12px rgba(0,0,0,0.06) !important; }
+
+/* Badges: compact, no heavy shadows */
+.badge { box-shadow: none !important; padding: 4px 8px !important; border-radius: var(--badge-radius) !important; font-weight: 700 !important; }
+
+/* Rep score: keep small and performant */
+.rep-score { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02) !important; }
+
+/* Global performance hint */
+* { will-change: auto !important; }
+
+/* Accessibility: ensure sufficient contrast for focus outlines on dark backgrounds */
+.nav-tab:focus-visible, .btn:focus-visible, .mob-nav-btn:focus-visible { outline: 3px solid rgba(255,255,255,0.08); }
+
+/* End normalization */
+
 .info-row:last-child { border-bottom: none; }
 .info-label { color: var(--muted); font-size: 12.5px; }
 .info-value { font-weight: 500; }
