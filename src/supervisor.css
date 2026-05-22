@@ -1,48 +1,51 @@
-/* Supervisor panel visual tweaks — small, low-risk UI improvements */
-
 #tab-supervisor .card {
-  padding: 12px;
-  margin: 10px 0;
-  border-radius: 6px;
-  background: #ffffff;
-  box-shadow: 0 1px 4px rgba(16,24,40,0.04);
-  border: 1px solid rgba(15,23,42,0.04);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
 }
 
 #tab-supervisor .suggestion-list .suggestion-row {
   display: flex;
-  gap: 10px;
-  padding: 8px 6px;
-  border-bottom: 1px solid #f3f4f6;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
   align-items: center;
 }
 
 #tab-supervisor .suggestion-rank {
-  font-weight: 700;
-  width: 34px;
+  font-weight: 600;
+  width: 28px;
   text-align: center;
-  background: #f8fafc;
-  border-radius: 4px;
-  color: #0f172a;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-1) 0;
+  flex-shrink: 0;
 }
 
-#tab-supervisor .suggestion-title { font-weight: 600; }
-#tab-supervisor .suggestion-meta { color: #475569; font-size: 12px; }
-#tab-supervisor .suggestion-explain { color: #64748b; font-size: 12px; margin-top:4px }
+#tab-supervisor .suggestion-title { font-weight: 600; color: var(--text-primary); }
+#tab-supervisor .suggestion-meta { color: var(--text-muted); font-size: var(--text-xs); }
+#tab-supervisor .suggestion-explain { color: var(--text-muted); font-size: var(--text-xs); margin-top: var(--space-1); }
 
 #tab-supervisor .alerts-list .alert-row {
-  padding: 10px 12px;
-  border-left: 4px solid #f59e0b;
-  background: #fffbf0;
-  margin-bottom: 8px;
-  border-radius: 4px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--warning);
+  background: var(--warning-bg);
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--warning-fg);
 }
 #tab-supervisor .alerts-list .alert-row.critical {
-  border-left-color: #dc2626;
-  background: #fff5f5;
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
 }
 
-#tab-supervisor .quick-tools button { margin-right: 8px; margin-bottom: 8px; }
+#tab-supervisor .quick-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#tab-supervisor .quick-tools button { margin: 0; }
 
 @media (max-width: 640px) {
   #tab-supervisor .suggestion-list .suggestion-row { flex-direction: column; align-items: flex-start; }

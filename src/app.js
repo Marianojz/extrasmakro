@@ -150,7 +150,11 @@ function createIcon(name, title = '') {
     clock: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     money: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 9v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 8h4M10 16h4" stroke="currentColor" stroke-width="1.0" stroke-linecap="round"/></svg>',
     star: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l2.6 6.8L21 10l-5 3.7L17.2 22 12 18.6 6.8 22 8 13.7 3 10l6.4-1.2L12 2z" stroke="currentColor" stroke-width="0.6" fill="currentColor"/></svg>',
-    moon: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" stroke="currentColor" stroke-width="1.0" fill="currentColor"/></svg>'
+    moon: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" stroke="currentColor" stroke-width="1.0" fill="currentColor"/></svg>',
+    plus: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    smartphone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="2" width="12" height="20" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M12 18h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    download: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M12 3v12M8 11l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    phone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
   };
   const markup = icons[name] || icons.info || 'ℹ️';
   const span = el('span', { class: 'info-ico hx-ico-wrap', title: title, html: markup });
@@ -187,10 +191,6 @@ function initStickyHeader() {
   if (!topEl || !sectionsEl) return;
   // apply sticky via class to avoid inline styles
   topEl.classList.add('top-sticky');
-
-  // ensure bottom orange line uses absolute class if present
-  const bottomLine = topEl.querySelector('.app-header-bottom-line');
-  if (bottomLine) bottomLine.classList.add('absolute');
 
   const computeOffset = () => {
     const headerH = topEl.offsetHeight;
@@ -339,7 +339,7 @@ function setMobileMode(val) {
   document.body.classList.toggle('desktop-mode', !val);
   localStorage.setItem('uiPreference', val ? 'mobile' : 'desktop');
   const btn = document.getElementById('view-toggle-btn');
-  if (btn) btn.textContent = val ? '🖥 Vista Escritorio' : '📱 Vista Móvil';
+  if (btn) btn.title = val ? 'Cambiar a escritorio' : 'Cambiar a móvil';
   // Re-render views afectadas por el cambio de modo
   const rankingCont = document.getElementById('stats-ranking');
   if (rankingCont) renderRankingTable();
@@ -648,73 +648,96 @@ async function mountUI() {
   const toastContainer = el('div', { id: 'toast-container', class: 'toast-container' });
   document.body.appendChild(toastContainer);
 
-  // Header
-  const header = el('header', { class: 'app-header celsur-header' },
-    el('div', { class: 'app-header-inner' },
-      el('div', { class: 'app-brand' },
-        el('img', { src: '/celsur-logo.png', alt: 'Celsur', class: 'app-logo-img', onerror: "this.style.display='none'" }),
-        el('div', { class: 'app-brand-text' },
-          el('span', { class: 'app-title' }, 'Extras Celsur'),
-          el('span', { class: 'app-op' }, 'Op. Makro'),
-          el('span', { class: 'app-subtitle muted small' }, 'Gestión de horas extras · CELSUR')
-        )
-      ),
-      // User / auth quick info
-      el('div', { id: 'user-info', class: 'user-info' },
-        el('span', { id: 'user-display', class: 'muted small' }, 'No autenticado'),
-        el('div', { id: 'auth-actions', class: 'auth-actions' },
-          el('button', { id: 'btn-login', class: 'btn btn-sm', title: 'Iniciar sesión' }, 'Iniciar sesión'),
-          el('button', { id: 'btn-logout', class: 'btn btn-sm ml-sm', title: 'Cerrar sesión' }, 'Cerrar sesión')
-        )
-      ),
-      el('div', { id: 'shift-indicator', class: 'shift-badge' }),
-      // Quick operational actions (one-tap supervisors)
-      el('div', { class: 'header-actions' },
-        el('button', { class: 'btn btn-action', onclick: () => switchTab('convocatorias'), title: 'Convocar' }, '📞 Convocar'),
-        el('button', { class: 'btn btn-primary', onclick: () => switchTab('sabados'), title: 'Asignar sábado' }, '📅 Sábado'),
-        el('button', { class: 'btn btn-info', onclick: () => switchTab('empleados'), title: 'Buscar empleado' }, '🔎 Buscar'),
-        el('button', { class: 'btn btn-secondary', onclick: () => switchTab('dashboard'), title: 'Abrir dashboard' }, '📈 Dashboard'),
-        el('button', { id: 'debug-toggle-header', class: 'btn btn-secondary', onclick: () => { try { window.__HX_TOGGLE_DEBUG_PANEL__?.(); } catch(e){} }, title: 'Debug Panel (supervisor)' }, '🛠 Debug')
-      ),
-
-      /* Operational Command Bar: compact, grouped quick actions */
-      el('div', { id: 'op-command-bar', class: 'op-command-bar' },
-        el('div', { class: 'op-cmd-group' },
-          el('button', { class: 'op-cmd-btn primary', onclick: () => { switchTab('convocatorias'); }, title: 'Nueva convocatoria' }, '＋ Convocar'),
-          el('button', { class: 'op-cmd-btn', onclick: () => { showModal('Registrar intento', el('div', { html: '<p>Registrar intento rápido</p>' })); }, title: 'Registrar intento' }, '📞 Intento'),
-          el('button', { class: 'op-cmd-btn', onclick: () => { showModal('Registrar falta', el('div', { html: '<p>Registrar falta rápida</p>' })); }, title: 'Registrar falta' }, '❌ Falta')
-        ),
-        el('div', { class: 'op-cmd-group' },
-          el('button', { class: 'op-cmd-btn', onclick: () => switchTab('estadisticas'), title: 'Ranking' }, '🏆'),
-          el('button', { class: 'op-cmd-btn', onclick: () => switchTab('sabados'), title: 'Sábados' }, '📅'),
-          el('button', { class: 'op-cmd-btn', onclick: () => { const b = new Blob([JSON.stringify({ exported: 'data' })], { type: 'application/json' }); downloadBlob(b, 'export.json'); }, title: 'Exportar' }, '⤓')
-        )
-      ),
-
-      el('button', { id: 'view-toggle-btn', class: 'view-toggle-btn', onclick: () => toggleMobileMode() }, '📱 Vista Móvil'),
-      featureOn('explainMode') ? el('button', { id: 'explain-toggle-btn', class: 'view-toggle-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); } }, 'Modo explicación: OFF') : null,
-      el('span', { id: 'app-version', class: 'muted small' }, 'v' + (APP_CONFIG.APP_VERSION || '—'), createInfoIcon('Versión de la aplicación'))
-    ),
-    el('div', { class: 'app-header-bottom-line' })
-  );
-
-  // Nav tabs
+  // Nav tabs (build before header so header can embed them)
   const tabLabels = {
-    empleados: '👥 Empleados',
-    semana: '📋 Semana',
-    convocatorias: '📞 Convocatorias',
-    sabados: '📅 Sábados v1.2',
-    turno_noche: '🌙 Turno Noche',
-    estadisticas: '📊 Estadísticas',
-      dashboard: '🧾 Dashboard',
-      supervisor: '🧭 Supervisor',
-      config: '⚙️ Config',
-    };
+    empleados: 'Empleados',
+    semana: 'Semana',
+    convocatorias: 'Convocatorias',
+    sabados: 'Sábados',
+    turno_noche: 'Turno Noche',
+    estadisticas: 'Estadísticas',
+    dashboard: 'Dashboard',
+    supervisor: 'Supervisor',
+    config: 'Config',
+  };
+  const tabIcons = {
+    empleados: 'user',
+    semana: 'calendar',
+    convocatorias: 'phone',
+    sabados: 'calendar',
+    turno_noche: 'moon',
+    estadisticas: 'chart',
+    dashboard: 'home',
+    supervisor: 'info',
+    config: 'gear',
+  };
   const nav = el('nav', { class: 'nav-tabs' });
   for (const t of TABS) {
-    const btn = el('button', { class: 'nav-tab', 'data-tab': t, onclick: () => switchTab(t) }, tabLabels[t]);
+    const btn = el('button', { class: 'nav-tab', 'data-tab': t, onclick: () => switchTab(t) },
+      createIcon(tabIcons[t] || 'info', tabLabels[t]),
+      el('span', {}, tabLabels[t])
+    );
     nav.appendChild(btn);
   }
+
+  // Header — single-row 3-zone architecture
+  const header = el('header', { class: 'app-header' },
+    el('div', { class: 'header-primary' },
+      /* LEFT: Brand */
+      el('div', { class: 'header-left' },
+        el('div', { class: 'brand' },
+          el('img', { src: '/celsur-logo.png', alt: 'Celsur', class: 'brand-logo', onerror: "this.style.display='none'" }),
+          el('div', { class: 'brand-text' },
+            el('span', { class: 'brand-name' }, 'Extras Celsur'),
+            el('span', { class: 'brand-context' }, 'Op. Makro')
+          )
+        )
+      ),
+      /* CENTER: Navigation tabs */
+      el('div', { class: 'header-center' }, nav),
+      /* RIGHT: Status + User + Actions */
+      el('div', { class: 'header-right' },
+        el('div', { class: 'header-actions' },
+          el('button', { class: 'header-action-btn primary', onclick: () => switchTab('convocatorias'), title: 'Nueva convocatoria' },
+            createIcon('plus', 'Convocar'), 'Convocar'
+          ),
+          el('button', { class: 'header-action-btn', onclick: () => switchTab('sabados'), title: 'Gestión de sábados' },
+            createIcon('calendar', 'Sábados'), 'Sábado'
+          )
+        ),
+        el('span', { class: 'header-actions-divider' }),
+        el('div', { class: 'header-status' },
+          el('span', { id: 'status-dot', class: 'status-dot', title: 'Operational' }),
+          el('div', { id: 'shift-indicator', class: 'shift-badge' })
+        ),
+        el('div', { id: 'user-info', class: 'header-user' },
+          el('span', { id: 'user-display', class: 'user-text' }, 'No autenticado'),
+          el('div', { id: 'auth-actions', class: 'auth-actions' },
+            el('button', { id: 'btn-login', class: 'btn btn-sm', title: 'Iniciar sesión' }, 'Iniciar sesión'),
+            el('button', { id: 'btn-logout', class: 'btn btn-sm ml-sm', title: 'Cerrar sesión' }, 'Cerrar sesión')
+          )
+        ),
+        el('div', { class: 'header-meta' },
+          el('button', { id: 'view-toggle-btn', class: 'header-icon-btn', onclick: () => toggleMobileMode(), title: 'Vista Móvil / Escritorio' },
+            createIcon('smartphone', 'Vista móvil/escritorio')
+          ),
+          featureOn('explainMode') ? el('button', { id: 'explain-toggle-btn', class: 'header-icon-btn', onclick: () => { const on = !document.body.classList.contains('explain-mode'); setExplainMode(on); }, title: 'Modo explicación' },
+            createIcon('info', 'Modo explicación')
+          ) : null,
+          el('button', { class: 'header-icon-btn', onclick: () => switchTab('dashboard'), title: 'Dashboard' },
+            createIcon('chart', 'Dashboard')
+          ),
+          el('button', { id: 'debug-toggle-header', class: 'header-icon-btn', onclick: () => { try { window.__HX_TOGGLE_DEBUG_PANEL__?.(); } catch(e){} }, title: 'Debug Panel' },
+            createIcon('gear', 'Debug')
+          ),
+          el('button', { class: 'header-icon-btn', onclick: () => { const b = new Blob([JSON.stringify({ exported: 'data' })], { type: 'application/json' }); downloadBlob(b, 'export.json'); }, title: 'Exportar datos' },
+            createIcon('download', 'Exportar')
+          ),
+          el('span', { id: 'app-version', class: 'version-text' }, 'v' + (APP_CONFIG.APP_VERSION || '—'))
+        )
+      )
+    )
+  );
 
   // Sections
   const sections = el('div', { class: 'tab-sections' },
@@ -732,7 +755,7 @@ async function mountUI() {
   const alertBar = el('div', { id: 'alert-bar', class: 'alert-bar' });
   const footer = el('footer', { class: 'app-footer' }, 'creado por M. Zequeira');
 
-  const topContainer = el('div', { class: 'top-container' }, header, nav);
+  const topContainer = el('div', { class: 'top-container' }, header);
 
   appRoot.innerHTML = '';
   appRoot.appendChild(topContainer);
@@ -790,6 +813,21 @@ async function refreshShiftIndicator() {
   const cfg = await Models.getSystemConfig();
   const el2 = $id('shift-indicator');
   if (el2) el2.textContent = 'Turno activo: ' + cfg.currentShiftWeek.toUpperCase();
+  // Dynamic status dot: check for degraded state or startup alerts
+  const dot = $id('status-dot');
+  if (dot) {
+    const rt = window.__HX_RUNTIME__ || {};
+    if (rt.degraded || startupAlerts.some(a => a.type === 'danger')) {
+      dot.className = 'status-dot crit';
+      dot.title = 'Degradado';
+    } else if (startupAlerts.some(a => a.type === 'warning')) {
+      dot.className = 'status-dot warn';
+      dot.title = 'Advertencias activas';
+    } else {
+      dot.className = 'status-dot';
+      dot.title = 'Operational';
+    }
+  }
 }
 
 function renderAlertBar() {
@@ -1888,8 +1926,8 @@ async function renderCallHistory() {
       completa: { cls: 'badge-state-complete', label: 'Completa', color: 'var(--success)' },
       cerrada: { cls: 'badge-state-closed', label: 'Cerrada', color: 'var(--danger)' },
       vencida: { cls: 'badge-state-expired', label: 'Vencida', color: '#b45309' },
-      conflictiva: { cls: 'badge-state-conflict', label: 'Conflictiva', color: '#7c3aed' },
-      recovery_pending: { cls: 'badge-state-recovery', label: 'Recovery', color: '#065f46' }
+      conflictiva: { cls: 'badge-state-conflict', label: 'Conflictiva', color: 'var(--conflict)' },
+      recovery_pending: { cls: 'badge-state-recovery', label: 'Recovery', color: 'var(--recovery)' }
     };
     const st = stateMap[stateKey] || stateMap.abierta;
 
