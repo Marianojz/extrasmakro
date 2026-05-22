@@ -3682,7 +3682,7 @@ function openPrintableReport() {
       el('option', { value: 'eventual_comun' }, 'Eventual común')
     )),
     formField('', el('label', { class: 'label-inline' },
-      el('input', { id: 'report-activos', type: 'checkbox', checked: true, class: 'chk-sm' },
+      el('input', { id: 'report-activos', type: 'checkbox', checked: true, class: 'chk-sm' }),
       'Solo empleados activos'
     ))
   );
