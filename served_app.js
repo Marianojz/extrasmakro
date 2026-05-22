@@ -3671,6 +3671,17 @@ async function generateEmployeePrintableReport(id) {
       <td>${inc.descargo?.text || '--'}</td>
     </tr>`
   ).join('');
+
+  // Build penalties HTML separately to avoid nested template/ternary complexity
+  let penaltiesHtml = '';
+  if (featureOn('penalties')) {
+    penaltiesHtml = '<h2>Historial de incidentes (' + ((e.incidents || []).length) + ')</h2>';
+    if (incRows) {
+      penaltiesHtml += '<table><thead><tr><th>Fecha</th><th>Motivo</th><th>Delta rep.</th><th>Estado</th><th>Descargo</th></tr></thead><tbody>' + incRows + '</tbody></table>';
+    } else {
+      penaltiesHtml += '<p style="color:#777">Sin incidentes registrados.</p>';
+    }
+  }
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3715,13 +3726,7 @@ async function generateEmployeePrintableReport(id) {
     <div class="row"><span class="lbl">Falto:</span><span>${e.stats.falto}</span></div>
     <div class="row"><span class="lbl">Sabados trabajados:</span><span>${e.stats.sabados_trabajados}</span></div>
   </div>
-  ${featureOn('penalties') ? `<h2>Historial de incidentes (${(e.incidents || []).length})</h2>
-  ${incRows ? `<table>
-    <thead><tr>
-      <th>Fecha</th><th>Motivo</th><th>Delta rep.</th><th>Estado</th><th>Descargo</th>
-    </tr></thead>
-    <tbody>${incRows}</tbody>
-  </table>` : '<p style="color:#777">Sin incidentes registrados.</p>'}` : ''}
+  ${penaltiesHtml}
   <div class="footer">Generado: ${new Date().toLocaleString()} - Horas Extras V2 (offline)</div>
 </body>
 </html>`;
