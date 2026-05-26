@@ -156,7 +156,8 @@ function createIcon(name, title = '') {
     download: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M12 3v12M8 11l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     phone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
   };
-  const markup = icons[name] || icons.info || 'ℹ️';
+  const raw = icons[name] || icons.info || 'ℹ️';
+  const markup = raw.replace('<svg ', '<svg aria-hidden="true" ');
   const span = el('span', { class: 'info-ico hx-ico-wrap', title: title, html: markup });
   return span;
 }
@@ -250,19 +251,30 @@ function toast(msg, type = 'info', ms = 3800) {
 function showModal(title, bodyNode, buttons = []) {
   closeModal();
   const backdrop = el('div', { class: 'modal-backdrop', id: 'modal_backdrop' });
-  const closeBtn = el('button', { class: 'modal-close', onclick: closeModal }, '✕');
-  const header = el('div', { class: 'modal-header' }, el('h3', { class: 'modal-title' }, title), closeBtn);
+  const titleId = 'modal-title-' + Date.now();
+  const closeBtn = el('button', { class: 'modal-close', 'aria-label': 'Cerrar', onclick: closeModal }, '✕');
+  const header = el('div', { class: 'modal-header' }, el('h3', { class: 'modal-title', id: titleId }, title), closeBtn);
   const body = el('div', { class: 'modal-body' }, bodyNode);
   const footer = el('div', { class: 'modal-footer' });
   for (const b of buttons) {
     const btn = el('button', { class: b.cls || 'btn btn-primary', onclick: () => b.action?.() }, b.label);
     footer.appendChild(btn);
   }
-  const modal = el('div', { class: 'modal' }, header, body, footer);
+  const modal = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId }, header, body, footer);
   backdrop.appendChild(modal);
   document.body.appendChild(backdrop);
   // Cerrar al hacer clic fuera del modal
   backdrop.addEventListener('click', e => { if (e.target === backdrop) closeModal(); });
+  // Cerrar con Escape
+  const escHandler = (e) => { if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); } };
+  document.addEventListener('keydown', escHandler);
+  // Focus first focusable element inside modal
+  setTimeout(() => {
+    const focusable = modal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length) focusable[0].focus();
+  }, 50);
+  // Guardar foco previo para restaurar al cerrar
+  window.__lastFocusedEl = document.activeElement;
 }
 
 function closeModal() {
@@ -271,7 +283,12 @@ function closeModal() {
   // play closing animation when available, then remove
   try {
     bd.classList.add('closing');
-    setTimeout(() => { bd.remove(); }, 180);
+    setTimeout(() => {
+      bd.remove();
+      // Restaurar foco al elemento que abrió el modal
+      try { if (window.__lastFocusedEl && typeof window.__lastFocusedEl.focus === 'function') window.__lastFocusedEl.focus(); } catch(e) {}
+      window.__lastFocusedEl = null;
+    }, 180);
   } catch (e) { bd.remove(); }
 }
 
@@ -409,7 +426,7 @@ function buildMobileBottomNav() {
       el('span', { class: 'mob-nav-label' }, t.label)
     ));
   }
-  return el('nav', { class: 'mobile-bottom-nav', id: 'mobile-bottom-nav' }, inner);
+  return el('nav', { class: 'mobile-bottom-nav', id: 'mobile-bottom-nav', 'aria-label': 'Navegación móvil' }, inner);
 }
 
 async function buildMobileHomeQuickActions() {
@@ -628,7 +645,7 @@ function buildTabSupervisor() {
           el('button', { class: 'btn btn-secondary', onclick: () => showModal('Runtime Health', el('pre', { class: 'mono' }, JSON.stringify(window.__HX_RUNTIME__ || {}, null, 2))) }, 'Runtime Health'),
           el('button', { class: 'btn btn-secondary', onclick: async () => { const telemetry = api.meta.getTelemetry(); showModal('Retry & Conflict Diagnostics', el('pre', { class: 'mono' }, JSON.stringify(telemetry, null, 2))); } }, 'Retry Diagnostics'),
           el('button', { class: 'btn btn-secondary', onclick: async () => { const health = api.meta.generateOperationalHealthSummary(); showModal('Operational Health', el('pre', { class: 'mono' }, JSON.stringify(health, null, 2))); } }, 'Conflict Diagnostics'),
-          el('button', { class: 'btn btn-primary', onclick: () => { const body = el('div', {}, el('input', { id: 'quick-emp-id', class: 'input-full', placeholder: 'ID o nombre empleado' })); showModal('Employee quick lookup', body, [ { label: 'Buscar', cls: 'btn btn-primary', action: async () => { const v = $id('quick-emp-id').value.trim(); try { const emp = await Models.getEmployee(v); if (!emp) { toast('Empleado no encontrado','warning'); return; } showModal('Empleado', el('pre',{class:'mono'}, JSON.stringify(emp, null, 2)), [{ label:'Cerrar', cls:'btn btn-secondary', action: closeModal }]); } catch(e){ toast('Lookup failed','error'); } } }, { label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal } ]); } }, 'Employee lookup')
+          el('button', { class: 'btn btn-primary', onclick: () => { const body = el('div', {}, el('input', { id: 'quick-emp-id', class: 'input-full', placeholder: 'ID o nombre empleado', 'aria-label': 'ID o nombre de empleado a buscar' })); showModal('Employee quick lookup', body, [ { label: 'Buscar', cls: 'btn btn-primary', action: async () => { const v = $id('quick-emp-id').value.trim(); try { const emp = await Models.getEmployee(v); if (!emp) { toast('Empleado no encontrado','warning'); return; } showModal('Empleado', el('pre',{class:'mono'}, JSON.stringify(emp, null, 2)), [{ label:'Cerrar', cls:'btn btn-secondary', action: closeModal }]); } catch(e){ toast('Lookup failed','error'); } } }, { label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal } ]); } }, 'Employee lookup')
         );
         tr.appendChild(quick);
       }
@@ -645,7 +662,7 @@ async function mountUI() {
   const appRoot = $id('app');
 
   // Toast container
-  const toastContainer = el('div', { id: 'toast-container', class: 'toast-container' });
+  const toastContainer = el('div', { id: 'toast-container', class: 'toast-container', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   document.body.appendChild(toastContainer);
 
   // Nav tabs (build before header so header can embed them)
@@ -671,7 +688,7 @@ async function mountUI() {
     supervisor: 'info',
     config: 'gear',
   };
-  const nav = el('nav', { class: 'nav-tabs' });
+  const nav = el('nav', { class: 'nav-tabs', 'aria-label': 'Navegación principal' });
   for (const t of TABS) {
     const btn = el('button', { class: 'nav-tab', 'data-tab': t, onclick: () => switchTab(t) },
       createIcon(tabIcons[t] || 'info', tabLabels[t]),
@@ -793,7 +810,7 @@ async function mountUI() {
     // wire login button (shows modal)
     const lb = $id('btn-login');
     if (lb) lb.addEventListener('click', async () => {
-      const body = el('div', {}, el('input', { id: 'login-email', type: 'email', class: 'input-full', placeholder: 'Email' }), el('input', { id: 'login-pass', type: 'password', class: 'input-full', placeholder: 'Password' }));
+      const body = el('div', {}, el('input', { id: 'login-email', type: 'email', class: 'input-full', placeholder: 'Email', 'aria-label': 'Correo electrónico' }), el('input', { id: 'login-pass', type: 'password', class: 'input-full', placeholder: 'Contraseña', 'aria-label': 'Contraseña' }));
       showModal('Iniciar sesión', body, [
         { label: 'Cancelar', cls: 'btn btn-secondary', action: closeModal },
         { label: 'Entrar', cls: 'btn btn-primary', action: async () => {
@@ -856,11 +873,11 @@ function buildTabEmpleados() {
   const toolbar = el('div', { class: 'toolbar' },
     el('input', {
       id: 'emp-search', type: 'text', class: 'input-search',
-      placeholder: '🔍 Buscar por nombre o ID…',
+      placeholder: '🔍 Buscar por nombre o ID…', 'aria-label': 'Buscar empleados por nombre o ID',
       oninput: () => { empSearch = $id('emp-search').value.trim(); empPage = 1; renderEmployees(); }
     }),
     el('select', {
-      id: 'emp-turno-filter', class: 'select-sm',
+      id: 'emp-turno-filter', class: 'select-sm', 'aria-label': 'Filtrar por turno',
       onchange: () => { empTurnoFilter = $id('emp-turno-filter').value; empPage = 1; renderEmployees(); }
     },
       el('option', { value: '' }, 'Todos los turnos'),
@@ -868,7 +885,7 @@ function buildTabEmpleados() {
       el('option', { value: 'tarde' }, 'Turno tarde')
     ),
     el('select', {
-      id: 'emp-page-size', class: 'select-sm',
+      id: 'emp-page-size', class: 'select-sm', 'aria-label': 'Tamaño de página',
       onchange: () => { empPageSz = parseInt($id('emp-page-size').value); empPage = 1; renderEmployees(); }
     },
       el('option', { value: '25', selected: '' }, '25'),
@@ -1099,7 +1116,7 @@ async function renderWeekPlanner() {
 
   // ── Filtro turno ──
   let planFilter = '';
-  const filterSel = el('select', { class: 'select-sm', onchange: e => { planFilter = e.target.value; redraw(); } },
+  const filterSel = el('select', { class: 'select-sm', 'aria-label': 'Filtrar planilla por turno', onchange: e => { planFilter = e.target.value; redraw(); } },
     el('option', { value: '' }, 'Todos los turnos'),
     el('option', { value: 'mañana' }, 'Mañana'),
     el('option', { value: 'tarde' }, 'Tarde')
@@ -1160,7 +1177,7 @@ async function renderWeekPlanner() {
       const row = el('tr', { class: av.disponible ? 'week-row-avail' : '' });
 
       // ── Disponible checkbox ──
-      const chkDisp = el('input', { type: 'checkbox', class: 'week-chk' });
+      const chkDisp = el('input', { type: 'checkbox', class: 'week-chk', 'aria-label': 'Disponible: ' + (emp.name || emp.id) });
       chkDisp.checked = !!av.disponible;
       chkDisp.addEventListener('change', () => {
         const existing = Object.assign({}, editableMap[emp.id] || { disponible: false, dias: [] });
@@ -1175,7 +1192,7 @@ async function renderWeekPlanner() {
 
       // ── Día checkboxes ──
       const diaChks = dias.map(d => {
-        const chk = el('input', { type: 'checkbox', class: 'week-chk' });
+        const chk = el('input', { type: 'checkbox', class: 'week-chk', 'aria-label': d + ' - ' + (emp.name || emp.id) });
         chk.checked = av.dias.includes(d);
         chk.disabled = !av.disponible;
         chk.addEventListener('change', () => {
@@ -1459,7 +1476,7 @@ function openDescargoModal(employeeId, incidentId) {
   if (!featureOn('penalties')) { toast('El módulo de penalizaciones está desactivado.', 'warning'); return; }
   const body = el('div', {},
     el('p', {}, 'Ingresá el texto del descargo del empleado:'),
-    el('textarea', { id: 'descargo-text', class: 'textarea-full', rows: '4', placeholder: 'Descripción del descargo…' })
+    el('textarea', { id: 'descargo-text', class: 'textarea-full', rows: '4', placeholder: 'Descripción del descargo…', 'aria-label': 'Texto del descargo' })
   );
   showModal('Presentar descargo', body, [
     { label: 'Cancelar', cls: 'btn btn-secondary', action: closeModal },
@@ -1740,7 +1757,7 @@ function openImportCsvModal() {
   } catch (e) {}
   const body = el('div', {},
     el('p', {}, 'Acepta archivos CSV, XLS o XLSX. Columnas: nombre, legajo, puesto, turno_base, tipo, antiguedad_meses, fecha_fin, telefono.'),
-    el('input', { id: 'csv-file-input', type: 'file', accept: '.csv,.xls,.xlsx', class: 'input-full' })
+    el('input', { id: 'csv-file-input', type: 'file', accept: '.csv,.xls,.xlsx', class: 'input-full', 'aria-label': 'Seleccionar archivo CSV o XLS' })
   );
   showModal('Importar empleados', body, [
     { label: 'Cancelar', cls: 'btn btn-secondary', action: closeModal },
@@ -1818,8 +1835,8 @@ function doImportCsv() {
 function buildTabConvocatorias() {
   const sec = el('div', { id: 'tab-convocatorias', class: 'tab-section' });
   const toolbar = el('div', { class: 'toolbar' },
-    el('input', { id: 'call-filter-search', type: 'text', class: 'input-search', placeholder: '🔍 Buscar por empleado, puesto o ID…', oninput: () => { callFilterSearch = $id('call-filter-search').value.trim().toLowerCase(); renderCallHistory(); } }),
-    el('select', { id: 'call-filter-state', class: 'select-sm', onchange: () => { callFilterState = $id('call-filter-state').value; renderCallHistory(); } },
+    el('input', { id: 'call-filter-search', type: 'text', class: 'input-search', placeholder: '🔍 Buscar por empleado, puesto o ID…', 'aria-label': 'Buscar convocatorias por empleado, puesto o ID', oninput: () => { callFilterSearch = $id('call-filter-search').value.trim().toLowerCase(); renderCallHistory(); } }),
+    el('select', { id: 'call-filter-state', class: 'select-sm', 'aria-label': 'Filtrar por estado de convocatoria', onchange: () => { callFilterState = $id('call-filter-state').value; renderCallHistory(); } },
       el('option', { value: '' }, 'Todos los estados'),
       el('option', { value: 'abierta' }, 'Abierta'),
       el('option', { value: 'parcial' }, 'Parcial'),
@@ -2107,7 +2124,7 @@ function buildTabSabados() {
       el('h3', {}, 'Seleccionar sabado a gestionar'),
       el('div', { class: 'toolbar' },
         el('input', {
-          id: 'sat-mgmt-date', type: 'date', class: 'input-sm',
+          id: 'sat-mgmt-date', type: 'date', class: 'input-sm', 'aria-label': 'Seleccionar sábado a gestionar',
           value: defaultDateStr,
           oninput: () => {
             const v = $id('sat-mgmt-date').value;
@@ -2153,11 +2170,11 @@ function buildTabTurnoNoche() {
     el('div', { class: 'card config-card' },
       el('h3', {}, 'Crear / Seleccionar evento'),
       el('div', { class: 'toolbar' },
-        el('input', { id: 'night-date', type: 'date', class: 'input-sm', onchange: () => {
+        el('input', { id: 'night-date', type: 'date', class: 'input-sm', 'aria-label': 'Fecha del evento turno noche', onchange: () => {
           const v = $id('night-date').value; if (v) nightMgmtDate = v.replace(/-/g, '_'); renderNightShiftPanel(); }
         }),
-        el('input', { id: 'night-sectores', type: 'text', class: 'input-sm', placeholder: 'Sectores (coma separada)' }),
-        el('select', { id: 'night-supervisor', class: 'input-sm' },
+        el('input', { id: 'night-sectores', type: 'text', class: 'input-sm', placeholder: 'Sectores (coma separada)', 'aria-label': 'Sectores separados por coma' }),
+        el('select', { id: 'night-supervisor', class: 'input-sm', 'aria-label': 'Supervisor del evento' },
           el('option', { value: '' }, 'Supervisor (opcional)'),
           ...(SUPERVISORES || []).map(s => el('option', { value: s.id }, s.nombre + ' \u2014 ' + s.legajo))
         ),
@@ -2318,17 +2335,17 @@ async function renderNightShiftPanel() {
   tbl.appendChild(tbody);
 
   // Inline add form (no modal)
-  const empSel = el('select', { id: 'night-add-emp', class: 'input-full' }, el('option', { value: '' }, '-- Seleccionar empleado --'));
+  const empSel = el('select', { id: 'night-add-emp', class: 'input-full', 'aria-label': 'Seleccionar empleado para agregar' }, el('option', { value: '' }, '-- Seleccionar empleado --'));
   Object.values(state.employees || {}).filter(e => e.activo).forEach(e => empSel.appendChild(el('option', { value: e.id }, safeText(e.name))));
   // Sector / Función selects driven by NIGHT_SHIFT_STRUCTURE
   let sectorInput;
   let funcInput;
   if (!NIGHT_SHIFT_STRUCTURE || Object.keys(NIGHT_SHIFT_STRUCTURE).length === 0) {
     console.error('NIGHT_SHIFT_STRUCTURE not configured — Turno Noche add form disabled.');
-    sectorInput = el('select', { id: 'night-add-sector', class: 'input-full', disabled: true }, el('option', { value: '' }, 'Sin estructura'));
-    funcInput = el('select', { id: 'night-add-func', class: 'input-full', disabled: true }, el('option', { value: '' }, 'Sin estructura'));
+    sectorInput = el('select', { id: 'night-add-sector', class: 'input-full', disabled: true, 'aria-label': 'Sector (sin estructura)' }, el('option', { value: '' }, 'Sin estructura'));
+    funcInput = el('select', { id: 'night-add-func', class: 'input-full', disabled: true, 'aria-label': 'Función (sin estructura)' }, el('option', { value: '' }, 'Sin estructura'));
   } else {
-    sectorInput = el('select', { id: 'night-add-sector', class: 'input-full', onchange: () => {
+    sectorInput = el('select', { id: 'night-add-sector', class: 'input-full', 'aria-label': 'Sector', onchange: () => {
       const sec = $id('night-add-sector').value;
       const funcSel = $id('night-add-func');
       funcSel.innerHTML = '';
@@ -2337,14 +2354,14 @@ async function renderNightShiftPanel() {
         NIGHT_SHIFT_STRUCTURE[sec].forEach(f => funcSel.appendChild(el('option', { value: f }, f)));
       }
     } }, el('option', { value: '' }, '-- Seleccionar sector --'));
-    funcInput = el('select', { id: 'night-add-func', class: 'input-full' }, el('option', { value: '' }, '-- Seleccionar función --'));
+    funcInput = el('select', { id: 'night-add-func', class: 'input-full', 'aria-label': 'Función' }, el('option', { value: '' }, '-- Seleccionar función --'));
     // populate sector options
     Object.keys(NIGHT_SHIFT_STRUCTURE).forEach(s => sectorInput.appendChild(el('option', { value: s }, s)));
   }
-  const menuSel = el('select', { id: 'night-add-menu', class: 'input-full' }, el('option', { value: 'comun' }, 'comun'), el('option', { value: 'dieta' }, 'dieta'), el('option', { value: 'especial' }, 'especial'));
-  const remisChk = el('input', { id: 'night-add-remis', type: 'checkbox' });
-  const direcInput = el('input', { id: 'night-add-direc', type: 'text', class: 'input-full' });
-  const supChk = el('input', { id: 'night-add-sup', type: 'checkbox' });
+  const menuSel = el('select', { id: 'night-add-menu', class: 'input-full', 'aria-label': 'Tipo de menú' }, el('option', { value: 'comun' }, 'comun'), el('option', { value: 'dieta' }, 'dieta'), el('option', { value: 'especial' }, 'especial'));
+  const remisChk = el('input', { id: 'night-add-remis', type: 'checkbox', 'aria-label': 'Requiere remis' });
+  const direcInput = el('input', { id: 'night-add-direc', type: 'text', class: 'input-full', 'aria-label': 'Dirección' });
+  const supChk = el('input', { id: 'night-add-sup', type: 'checkbox', 'aria-label': 'Es supervisor' });
 
   const addBtn = el('button', { class: 'btn btn-primary' , onclick: async () => {
     try {
@@ -2701,7 +2718,7 @@ async function renderSaturdayMobileSteps(cont) {
       content.append(
         el('p', { class: 'section-desc' }, 'Seleccioná el sábado a gestionar.'),
         el('input', {
-          id: 'sat-mgmt-date-mob', type: 'date', class: 'input-full',
+          id: 'sat-mgmt-date-mob', type: 'date', class: 'input-full', 'aria-label': 'Seleccionar sábado',
           value: satMgmtDate ? satMgmtDate.replace(/_/g, '-') : '',
           oninput: () => {
             const v = document.getElementById('sat-mgmt-date-mob').value;
@@ -3060,7 +3077,7 @@ async function renderNightShiftExecutive() {
   root.innerHTML = '';
   if (!featureOn('advancedStats')) return;
   // Header with month selector
-  const ymInput = el('input', { id: 'ns-month-select', type: 'month', class: 'input-sm' });
+  const ymInput = el('input', { id: 'ns-month-select', type: 'month', class: 'input-sm', 'aria-label': 'Seleccionar mes para análisis ejecutivo' });
   // default to current month
   ymInput.value = new Date().toISOString().slice(0,7);
   const header = el('div', { class: 'ns-exec-header' },
@@ -3367,7 +3384,7 @@ async function buildShiftConfig() {
     el('h3', {}, 'Turno activo esta semana'),
     el('p', { class: 'muted' }, 'Controla que turno tiene las extras de dias habiles esta semana. Al guardar queda registrado en el historial.'),
     el('div', { class: 'toolbar' },
-      el('select', { id: 'cfg-shift', class: 'input-full' },
+      el('select', { id: 'cfg-shift', class: 'input-full', 'aria-label': 'Turno activo de la semana' },
         el('option', { value: 'mañana', ...(cfg.currentShiftWeek === 'mañana' ? { selected: '' } : {}) }, 'Mañana'),
         el('option', { value: 'tarde', ...(cfg.currentShiftWeek === 'tarde' ? { selected: '' } : {}) }, 'Tarde')
       ),
@@ -3435,7 +3452,7 @@ function buildDataPanel() {
       el('div', { class: 'config-action-group' },
         el('h4', {}, 'Importar datos completos (JSON)'),
         el('p', { class: 'muted' }, 'Carga un archivo JSON exportado previamente. Reemplaza todos los datos actuales.'),
-        el('input', { id: 'import-json-file', type: 'file', accept: '.json', class: 'input-full' }),
+        el('input', { id: 'import-json-file', type: 'file', accept: '.json', class: 'input-full', 'aria-label': 'Seleccionar archivo JSON para importar' }),
         el('button', { class: 'btn btn-warning', onclick: doImportJson }, '⬆ Importar JSON')
       ),
 
@@ -3456,8 +3473,8 @@ function buildDataPanel() {
   const filterCard = el('div', { class: 'card config-card' },
     el('h3', {}, 'Filtro de fechas para exportación de eventos'),
     el('div', { class: 'toolbar' },
-      el('label', {}, 'Desde ', el('input', { id: 'filter-from', type: 'date', class: 'input-sm' })),
-      el('label', {}, 'Hasta ', el('input', { id: 'filter-to', type: 'date', class: 'input-sm' }))
+      el('label', {}, 'Desde ', el('input', { id: 'filter-from', type: 'date', class: 'input-sm', 'aria-label': 'Fecha desde para filtrar eventos' })),
+      el('label', {}, 'Hasta ', el('input', { id: 'filter-to', type: 'date', class: 'input-sm', 'aria-label': 'Fecha hasta para filtrar eventos' }))
     )
   );
 
@@ -3466,7 +3483,7 @@ function buildDataPanel() {
       el('h3', {}, 'Recuperación mensual de reputación'),
       el('p', { class: 'muted' }, `+${2} de reputación a empleados activos sin penalizaciones en el mes elegido. Ejecutá una sola vez por cierre mensual.`),
       el('div', { class: 'toolbar' },
-        el('input', { id: 'recovery-month', type: 'month', class: 'input-sm', value: new Date().toISOString().slice(0, 7) }),
+        el('input', { id: 'recovery-month', type: 'month', class: 'input-sm', 'aria-label': 'Seleccionar mes para recuperación', value: new Date().toISOString().slice(0, 7) }),
         el('button', { class: 'btn btn-success', onclick: async () => { try { if (typeof canExecuteOperation === 'function' && !canExecuteOperation('applyMonthlyRecovery')) { toast('Acceso denegado: permiso requerido', 'warning'); return; } await doApplyMonthlyRecovery(); } catch (e) { toast(String(e && e.message), 'error'); } } }, 'Aplicar recuperación mensual')
       )
     )
@@ -3885,8 +3902,11 @@ async function doExportReportXls() {
 const exportReportXls = openPrintableReport;
 
 function formField(label, inputEl) {
+  const id = inputEl.getAttribute('id');
+  const labelProps = { class: 'form-label' };
+  if (id) labelProps.for = id;
   return el('div', { class: 'form-field' },
-    el('label', { class: 'form-label' }, label),
+    el('label', labelProps, label),
     inputEl
   );
 }
