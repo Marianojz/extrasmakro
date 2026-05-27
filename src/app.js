@@ -14,29 +14,31 @@
 import api from './api/apiLayer.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
 import { isFeatureEnabled } from './config/features.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './runtime.js';  <-- REACTIVADO para testing FASE 2.1
+
+// [FASE 2 - SAFE MODE] Runtime modules con lazy init controlado
+// Solo init cuando DOM esté listo y app principal montada
+let __RUNTIME_INITIALIZED__ = false;
+let __RUNTIME_UI_INITIALIZED__ = false;
+let __DEBUG_PANEL_INITIALIZED__ = false;
+let __LIVE_INTELLIGENCE_INITIALIZED__ = false;
+let __V4_INITIALIZED__ = false;
+let __V5_INITIALIZED__ = false;
+
 import './runtime.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './runtime-ui.js';  <-- REACTIVADO para testing FASE 2.2
-import './runtime-ui.js';
+__RUNTIME_INITIALIZED__ = true;
+
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './debug-panel.js';  <-- REACTIVADO para testing FASE 2.3
+
 import './debug-panel.js';
+__DEBUG_PANEL_INITIALIZED__ = true;
+
 import runtimeDiagnostics from './runtimeDiagnostics.js';
 import './storage/cleanup-lite.js';
 import supervisor from './supervisor.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './live-intelligence.js';  <-- REACTIVADO para testing FASE 2.4
-import './live-intelligence.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './operational-intelligence-v4.js';  <-- REACTIVADO para testing FASE 2.5
-import './operational-intelligence-v4.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './strategic-operations-v5.js';  <-- REACTIVADO para testing FASE 2.6
-import './strategic-operations-v5.js';
+
+// [FASE 2] Intelligence modules diferidos hasta post-mount
+let _pendingIntelligenceInit = null;
 
 // [AUDIT CRÍTICO] startupEnvironmentValidation COMENTADO - posible fuente de loops/observers
 /*
