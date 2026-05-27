@@ -3,91 +3,52 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Sistema de gestión de horas extras y convocatorias — Celsur Op. Makro." />
-    <meta name="theme-color" content="#1d4ed8" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>Extras Celsur · Op. Makro</title>
-
-    <!-- Google Fonts: Inter (opcional, carga solo si hay red) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-          media="print" onload="this.media='all'" />
-
-    <link rel="stylesheet" href="/src/styles.css" />
-    <link rel="stylesheet" href="/src/supervisor.css" />
-    <link rel="stylesheet" href="/src/v5.css" />
-    <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
-    <script src="https://unpkg.com/lucide@latest" defer></script>
+    <title>BOOT OK</title>
+    
+    <!-- MODO RECUPERACION CRITICA: Todo deshabilitado -->
+    <!-- Service Worker: DESACTIVADO -->
+    <!-- PWA: DESACTIVADO -->
+    <!-- manifest: ELIMINADO -->
+    <!-- preload masivos: ELIMINADOS -->
+    <!-- fonts externas: DESACTIVADAS -->
+    <!-- animaciones CSS: DESACTIVADAS -->
+    <!-- backdrop-filter: DESACTIVADO -->
+    <!-- blur: DESACTIVADO -->
+    <!-- gradients complejos: DESACTIVADOS -->
+    <!-- transitions globales: DESACTIVADAS -->
+    
+    <!-- CSS mínimo sin animaciones/transiciones -->
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { 
+        font-family: system-ui, -apple-system, sans-serif; 
+        background: #080c12; 
+        color: #e6edf3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+      div { font-size: 24px; font-weight: bold; }
+    </style>
   </head>
   <body>
-
-    <!-- Punto de montaje de la aplicación (app.js monta todo aquí) -->
-    <main id="app"></main>
-
-    <!-- Fallback cuando JS está desactivado -->
-    <noscript>
-      <div style="font-family:Arial,sans-serif;text-align:center;padding:60px 20px;color:#555">
-        <h2>JavaScript requerido</h2>
-        <p>Esta aplicación necesita JavaScript para funcionar. Habilitalo en tu navegador.</p>
-      </div>
-    </noscript>
-
-    <!-- Captura errores críticos de módulos antes de que el app arranque -->
-    <script>
-      window.addEventListener('error', function(e) {
-        console.error('[global-error]', e.message, e.filename, e.lineno);
-      });
-      window.addEventListener('unhandledrejection', function(e) {
-        console.error('[unhandled-rejection]', e.reason);
-      });
-    </script>
-
-    <!-- Firebase CDN: expone módulos globalmente antes de cargar la app -->
-    <script type="module">
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-      import { getDatabase, ref, set, get, runTransaction, update, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-      import { getAuth, signInAnonymously, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-      window.firebaseModules = {
-        initializeApp,
-        getDatabase,
-        ref,
-        set,
-        get,
-        runTransaction,
-        update,
-        remove,
-        getAuth,
-        signInAnonymously,
-        signInWithEmailAndPassword,
-        signOut,
-        onAuthStateChanged
-      };
-    </script>
-
-    <!-- Supabase CDN: cliente JavaScript para PostgreSQL -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module">
-      try {
-        window.supabaseModules = {
-          createClient: supabase.createClient
-        };
-      } catch(e) {
-        console.warn('[supabase] CDN no disponible:', e.message);
-        window.supabaseModules = { createClient: null };
-      }
-    </script>
-
-    <!-- SheetJS: parseo de archivos XLS / XLSX -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-
-    <!-- Feature flags (lite) and build metadata (injected at release time) -->
-    <script src="/public/feature-flags.js"></script>
-    <script src="/public/build-metadata.js"></script>
-
-    <script type="module" src="/src/app.js"></script>
-    <script type="module" src="/src/strategic-integration.js"></script>
+    <!-- App principal reemplazada por diagnóstico básico -->
+    <div>BOOT OK</div>
+    
+    <!-- React Query: DESCONECTADO -->
+    <!-- sockets: DESCONECTADOS -->
+    <!-- polling: DESCONECTADO -->
+    <!-- observers: DESCONECTADOS -->
+    <!-- dashboards: DESCONECTADOS -->
+    <!-- tablas: DESCONECTADAS -->
+    <!-- métricas: DESCONECTADAS -->
+    
+    <!-- Todos los scripts externos e internos eliminados para diagnóstico -->
+    <!-- Firebase: DESCONECTADO -->
+    <!-- Supabase: DESCONECTADO -->
+    <!-- SheetJS: DESCONECTADO -->
+    <!-- app.js: DESCONECTADO -->
+    <!-- strategic-integration.js: DESCONECTADO -->
   </body>
 </html>
