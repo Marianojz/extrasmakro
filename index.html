@@ -87,7 +87,36 @@
     <script src="/public/feature-flags.js"></script>
     <script src="/public/build-metadata.js"></script>
 
-    <script type="module" src="/src/app.js"></script>
-    <script type="module" src="/src/strategic-integration.js"></script>
+    <script type="module">
+      (async function bootstrapApp() {
+        const appRoot = document.getElementById('app');
+        const showFatal = (msg) => {
+          if (!appRoot) return;
+          appRoot.innerHTML = `<div style="font-family:Arial,sans-serif;text-align:center;padding:60px 20px;color:#555">
+            <h2 style="color:#dc2626">No se pudo iniciar la aplicación</h2>
+            <p>${msg}</p>
+            <p style="font-size:0.85em;color:#999;margin-top:8px">Probá recargar con Ctrl+Shift+R. Si continúa, abrí F12 → Console.</p>
+          </div>`;
+        };
+
+        const withTimeout = (promise, ms, label) => {
+          let timer;
+          const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Timeout cargando ${label} (${ms}ms)`)), ms);
+          });
+          return Promise.race([promise.finally(() => clearTimeout(timer)), timeout]);
+        };
+
+        try {
+          await withTimeout(import('/src/app.js'), 15000, 'app.js');
+          import('/src/strategic-integration.js').catch((err) => {
+            console.warn('[strategic-integration] no cargó:', err);
+          });
+        } catch (err) {
+          console.error('[bootstrap-error]', err);
+          showFatal('El módulo principal no respondió a tiempo o falló durante la carga.');
+        }
+      })();
+    </script>
   </body>
 </html>
