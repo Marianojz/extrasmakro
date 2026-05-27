@@ -6,8 +6,13 @@
   if (typeof window === 'undefined') return;
 
   const MAX_FEED = 15;
-  const HEALTH_CHECK_INTERVAL = 5000;
-  const FEED_CLEANUP_INTERVAL = 30000;
+  // HARDENING: intervalos aumentados para reducir carga de CPU
+  const HEALTH_CHECK_INTERVAL = 10000;  // 10s en lugar de 5s
+  const FEED_CLEANUP_INTERVAL = 60000;  // 60s en lugar de 30s
+  
+  // HARDENING: singleton guard para evitar doble inicialización
+  let _runtimeUIMounted = false;
+  let _runtimeUICleanup = null;
 
   const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4 };
   const LOG_COLORS = {
@@ -159,6 +164,12 @@
   function tryPatchExport() {
     try { patchExportState(); } catch(e) {}
     if (!window.Models?.exportState?.__hxPatched) {
+      // HARDENING: límite de reintentos para evitar loop infinito
+      window.__HX_PATCH_RETRY_COUNT__ = (window.__HX_PATCH_RETRY_COUNT__ || 0) + 1;
+      if (window.__HX_PATCH_RETRY_COUNT__ > 10) {
+        console.warn('[runtime-ui] Patch export retry limit reached, aborting');
+        return;
+      }
       setTimeout(tryPatchExport, 1000);
     }
   }
@@ -469,6 +480,13 @@
     updateHeartbeat,
 
     mount() {
+      // HARDENING: singleton guard - evitar doble inicialización
+      if (_runtimeUIMounted) {
+        console.warn('[runtime-ui] Already mounted, skipping duplicate mount');
+        return _runtimeUICleanup;
+      }
+      _runtimeUIMounted = true;
+      
       // Patch export to detect loops
       tryPatchExport();
 
@@ -486,7 +504,7 @@
       // Start health check interval
       const cleanup = initExportDiagnostics();
 
-      // Feed cleanup every 30s
+      // Feed cleanup every 60s
       const feedCleanup = setInterval(cleanupStaleFeed, FEED_CLEANUP_INTERVAL);
 
       // Subscribe to runtime events if available
@@ -505,10 +523,14 @@
         });
       }
 
-      return () => {
+      const unmount = () => {
         cleanup();
         clearInterval(feedCleanup);
+        _runtimeUIMounted = false;
+        _runtimeUICleanup = null;
       };
+      _runtimeUICleanup = unmount;
+      return unmount;
     },
 
     subscribeToRuntimeEvents() {
