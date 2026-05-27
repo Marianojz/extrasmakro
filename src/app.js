@@ -1,60 +1,39 @@
 /**
  * app.js — Interfaz principal de Horas Extras V2
  * ─────────────────────────────────────────────────────────────────────────────
- * Estructura de la UI:
- *   Header + NavTabs
- *   ├── Tab: Empleados      (listado, alta, importar CSV)
- *   ├── Tab: Convocatorias  (iniciar llamada, registrar intentos)
- *   ├── Tab: Sábados        (registrar intenciones y horas)
- *   ├── Tab: Estadísticas   (ranking, scores, resumen global)
- *   └── Tab: Config         (turno semana, import/export, reset)
+ * FASE A - AISLAMIENTO BINARIO: React mínimo / App vacío / Sin providers
+ * Estado: INICIANDO FASE A
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import api from './api/apiLayer.js';
-import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
+// FASE A: Solo imports esenciales - SIN módulos complejos
+import { APP_CONFIG } from './config.js';
 import { isFeatureEnabled } from './config/features.js';
-import './runtime.js';
-import './runtime-ui.js';
-const Models = api;
-import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
-import './debug-panel.js';
-import runtimeDiagnostics from './runtimeDiagnostics.js';
-import './storage/cleanup-lite.js';
-import supervisor from './supervisor.js';
-import './live-intelligence.js';
-import './operational-intelligence-v4.js';
-import './strategic-operations-v5.js';
+
+// COMENTADOS PARA FASE A:
+// import api from './api/apiLayer.js';
+// import './runtime.js';
+// import './runtime-ui.js';
+// const Models = api;
+// import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
+// import './debug-panel.js';
+// import runtimeDiagnostics from './runtimeDiagnostics.js';
+// import './storage/cleanup-lite.js';
+// import supervisor from './supervisor.js';
+// import './live-intelligence.js';
+// import './operational-intelligence-v4.js';
+// import './strategic-operations-v5.js';
+// import { normalizeId } from './utils_id.js';
+// import { initAuth, loginWithEmail, logout, getAuthDiagnostics, getCurrentUser } from './auth.js';
+// import { hasRole, canAccess, canExecuteOperation } from './permissions.js';
+
+console.log('[FASE A] Iniciando aislamiento binario - solo config básico');
 
 (function startupEnvironmentValidation(){
-  try {
-    const diag = runtimeDiagnostics.getEnvironmentDiagnostics();
-    window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {};
-    window.__HX_RUNTIME__.environmentDiagnostics = diag;
-    if (diag.degradedState) {
-      console.warn('[startup][degraded]', diag);
-      setTimeout(()=>{ try { if (typeof toast === 'function') toast('Startup degraded: check diagnostics', 'warning', 7000); } catch(e){} }, 2000);
-    } else {
-      console.info('[startup] environment ok', diag);
-    }
-  } catch (e) {
-    console.error('[startup][env-check-failed]', e);
-  }
+  console.log('[FASE A] Startup validación mínima - sin diagnostics complejos');
 })();
 
-import { normalizeId } from './utils_id.js';
-import { initAuth, loginWithEmail, logout, getAuthDiagnostics, getCurrentUser } from './auth.js';
-import { hasRole, canAccess, canExecuteOperation } from './permissions.js';
-
-// Initialize backend through the API boundary
-if (APP_CONFIG.STORAGE_BACKEND === 'supabase') {
-  void Models.system.initializeStorageBackend().catch(err => {
-    console.error(err.message);
-  });
-}
-
-// ─── DOM helpers ─────────────────────────────────────────────────────────────
-
+// FASE A: DOM helpers mínimos
 function el(tag, props = {}, ...children) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -65,19 +44,51 @@ function el(tag, props = {}, ...children) {
     else n.setAttribute(k, v);
   }
   for (const c of children) {
-    // Skip null/undefined/false children to avoid rendering the literal "null" or "false"
     if (c == null || c === false) continue;
     n.append(typeof c === 'string' ? document.createTextNode(c) : c);
   }
   return n;
 }
 
-debugLog('FASE 3C.1 — UI TURNO NOCHE OPTIMIZADA');
-
 function $id(id) { return document.getElementById(id); }
 
-// Safe text helper: avoids rendering `null`/`undefined` when concatenating names
-function safeText(value) { return value == null ? '' : String(value).replace(/\bnull\b/gi, '').trim(); }
+// FASE A: App mínima - solo mensaje de diagnóstico
+(function renderMinimalApp() {
+  const app = $id('app');
+  if (!app) {
+    console.error('[FASE A] No se encontró #app');
+    return;
+  }
+  
+  app.innerHTML = '';
+  app.appendChild(el('div', { class: 'fase-a-container' },
+    el('h1', {}, 'FASE A - AISLAMIENTO BINARIO'),
+    el('p', {}, 'Estado: React mínimo / Sin providers / Sin módulos complejos'),
+    el('div', { class: 'metrics-box' },
+      el('h3', {}, 'Métricas de Diagnóstico:'),
+      el('ul', {},
+        el('li', {}, 'Carga: COMPLETADA'),
+        el('li', {}, 'CPU: ' + (performance.now() < 100 ? 'BAJA' : 'MEDIA')),
+        el('li', {}, 'Memoria: ' + (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + ' MB' : 'N/A')),
+        el('li', {}, 'Scrolling: VALIDAR MANUAL'),
+        el('li', {}, 'Responsive: VALIDAR MANUAL'),
+        el('li', {}, 'DevTools: VALIDAR MANUAL')
+      )
+    ),
+    el('button', { 
+      class: 'test-btn',
+      onclick: () => { 
+        console.log('[FASE A] Botón de prueba clickeado - UI responsive'); 
+        alert('FASE A: UI funcional sin freeze');
+      } 
+    }, 'Test Click - Validar UI'),
+    el('p', { class: 'instructions' }, 
+      'Instrucciones: Si NO hay freeze, avanzar a FASE B. Si HAY freeze, este es el módulo culpable.'
+    )
+  ));
+  
+  console.log('[FASE A] App mínima renderizada correctamente');
+})();
 
 function featureOn(feature) {
   return isFeatureEnabled(feature);

@@ -1,0 +1,8 @@
+```
+# Backup files
+*.BACKUP_FASE_A
+*.ORIGINAL
+
+# Log files
+*.log
+```
