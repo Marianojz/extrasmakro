@@ -16,7 +16,7 @@ function buildSessionFromFirebaseUser(user) {
   if (!user) return null;
   const email = user.email || null;
   const uid = user.uid || (email ? email : 'unknown');
-  const role = (email && AUTH_ROLE_MAP && AUTH_ROLE_MAP[email]) ? AUTH_ROLE_MAP[email] : AUTH_DEFAULT_ROLE || 'SUPERVISOR';
+  const role = (email && ROLE_MAP && ROLE_MAP[email]) ? ROLE_MAP[email] : DEFAULT_ROLE || 'SUPERVISOR';
   const now = new Date().toISOString();
   const session = {
     userId: uid,

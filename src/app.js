@@ -4564,54 +4564,67 @@ function doApplyMonthlyRecovery() {
 // --- Inicializacion ----------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Firebase connection check
-  if (APP_CONFIG.FIREBASE_ENABLED) {
-    try {
-      await Models.system.verifyStorageConnection();
-      console.log('Firebase connected successfully');
-    } catch (e) {
-      console.log('Firebase connection failed');
+  try {
+    // Firebase connection check
+    if (APP_CONFIG.FIREBASE_ENABLED) {
+      try {
+        await Models.system.verifyStorageConnection();
+        console.log('Firebase connected successfully');
+      } catch (e) {
+        console.log('Firebase connection failed');
+      }
+    }
+
+    const expiredDescargas = await Models.expireStaleDescargas();
+    const deactivated = await Models.deactivateExpiredEventuals();
+    await Models.purgeOldWeekAvailability();   // limpia semanas viejas (> 8 sem)
+    weekPlannerKey = await Models.getISOWeekKey(); // reset al arrancar
+    if (expiredDescargas > 0) {
+      startupAlerts.push({ type: 'warning', msg: `⏰ Se cerraron automáticamente ${expiredDescargas} descargo(s) por vencimiento del plazo de 48 h.` });
+    }
+    if (deactivated.length > 0) {
+      const names = [];
+      for (const id of deactivated) {
+        const e = await Models.getEmployee(id);
+        names.push(e ? `${e.name} (${e.id})` : id);
+      }
+      const namesStr = names.join(', ');
+      startupAlerts.push({ type: 'danger', msg: `⚠️ ${deactivated.length} empleado(s) desactivado(s) por fin de contrato: ${namesStr}. Verificá en la pestaña Empleados.` });
+    }
+    await mountUI();
+    initMobileMode();  // inicializar modo antes del resto para que la clase esté activa
+    renderAlertBar();
+    // initialize sticky header behavior after UI mounted
+    try { initStickyHeader(); console.log('HEADER STICKY ACTIVADO'); } catch (e) { console.error("UI Error:", e); }
+    debugLog("FASE 3B HARDENING COMPLETADA");
+
+    // Mensajes solicitados (tienen visibilidad operativa reducida como toasts)
+    debugLog("FASE 3C PREPARACIÓN ASYNC COMPLETA");
+    debugLog("MODULO SABADO v1.2 IMPLEMENTADO");
+    debugLog("MODO MOVIL v1.0 IMPLEMENTADO");
+    try { toast('MODO MOVIL OPTIMIZADO REAL', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
+    // Branding confirmation (discrete)
+    try { toast('IDENTIDAD VISUAL CELSUR APLICADA', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
+
+    // Lucide Icons init
+    if (typeof lucide !== 'undefined') {
+      try { lucide.createIcons(); } catch (e) { /* non-critical */ }
+    }
+
+    // Final controlled init message (will only appear when DEBUG_MODE=true)
+    debugLog('SISTEMA INICIALIZADO EN MODO PRODUCCIÓN');
+  } catch (startupError) {
+    console.error('[startup] Error crítico en inicialización:', startupError);
+    const app = document.getElementById('app');
+    if (app) {
+      app.innerHTML = `<div style="font-family:Arial,sans-serif;text-align:center;padding:60px 20px;color:#555">
+        <h2 style="color:#dc2626">Error al inicializar la aplicación</h2>
+        <p>Ocurrió un error inesperado al cargar el sistema.</p>
+        <p style="font-size:0.85em;color:#999;margin-top:8px">Intentá recargar la página (Ctrl+Shift+R). Si el problema persiste, revisá la consola del navegador (F12).</p>
+        <p style="font-size:0.75em;color:#bbb;font-family:monospace;margin-top:12px">${startupError && startupError.message ? startupError.message : String(startupError)}</p>
+      </div>`;
     }
   }
-
-  const expiredDescargas = await Models.expireStaleDescargas();
-  const deactivated = await Models.deactivateExpiredEventuals();
-  await Models.purgeOldWeekAvailability();   // limpia semanas viejas (> 8 sem)
-  weekPlannerKey = await Models.getISOWeekKey(); // reset al arrancar
-  if (expiredDescargas > 0) {
-    startupAlerts.push({ type: 'warning', msg: `⏰ Se cerraron automáticamente ${expiredDescargas} descargo(s) por vencimiento del plazo de 48 h.` });
-  }
-  if (deactivated.length > 0) {
-    const names = [];
-    for (const id of deactivated) {
-      const e = await Models.getEmployee(id);
-      names.push(e ? `${e.name} (${e.id})` : id);
-    }
-    const namesStr = names.join(', ');
-    startupAlerts.push({ type: 'danger', msg: `⚠️ ${deactivated.length} empleado(s) desactivado(s) por fin de contrato: ${namesStr}. Verificá en la pestaña Empleados.` });
-  }
-  await mountUI();
-  initMobileMode();  // inicializar modo antes del resto para que la clase esté activa
-  renderAlertBar();
-  // initialize sticky header behavior after UI mounted
-  try { initStickyHeader(); console.log('HEADER STICKY ACTIVADO'); } catch (e) { console.error("UI Error:", e); }
-  debugLog("FASE 3B HARDENING COMPLETADA");
-
-  // Mensajes solicitados (tienen visibilidad operativa reducida como toasts)
-  debugLog("FASE 3C PREPARACIÓN ASYNC COMPLETA");
-  debugLog("MODULO SABADO v1.2 IMPLEMENTADO");
-  debugLog("MODO MOVIL v1.0 IMPLEMENTADO");
-  try { toast('MODO MOVIL OPTIMIZADO REAL', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
-  // Branding confirmation (discrete)
-  try { toast('IDENTIDAD VISUAL CELSUR APLICADA', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
-
-  // Lucide Icons init
-  if (typeof lucide !== 'undefined') {
-    try { lucide.createIcons(); } catch (e) { /* non-critical */ }
-  }
-
-  // Final controlled init message (will only appear when DEBUG_MODE=true)
-  debugLog('SISTEMA INICIALIZADO EN MODO PRODUCCIÓN');
 });
 console.log('ESTABILIZACIÓN POST-AUDITORÍA COMPLETADA');
 

@@ -34,6 +34,16 @@
       </div>
     </noscript>
 
+    <!-- Captura errores críticos de módulos antes de que el app arranque -->
+    <script>
+      window.addEventListener('error', function(e) {
+        console.error('[global-error]', e.message, e.filename, e.lineno);
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        console.error('[unhandled-rejection]', e.reason);
+      });
+    </script>
+
     <!-- Firebase CDN: expone módulos globalmente antes de cargar la app -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -60,9 +70,14 @@
     <!-- Supabase CDN: cliente JavaScript para PostgreSQL -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script type="module">
-      window.supabaseModules = {
-        createClient: supabase.createClient
-      };
+      try {
+        window.supabaseModules = {
+          createClient: supabase.createClient
+        };
+      } catch(e) {
+        console.warn('[supabase] CDN no disponible:', e.message);
+        window.supabaseModules = { createClient: null };
+      }
     </script>
 
     <!-- SheetJS: parseo de archivos XLS / XLSX -->
