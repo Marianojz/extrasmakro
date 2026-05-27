@@ -474,8 +474,54 @@ function buildTabDashboard() {
   sec.appendChild(el('h2', { class: 'section-title' }, 'Dashboard Operacional'));
   sec.appendChild(el('p', { class: 'section-desc' }, 'Visión rápida: estado runtime, KPIs operacionales y alertas críticas.'));
 
+  const execStrip = el('div', { class: 'exec-strip' });
+  (async () => {
+    try {
+      const emps = await Models.listEmployees();
+      const all = Array.isArray(emps) ? emps : Object.values(emps || {});
+      const totalEmps = all.length;
+      const activeEmps = all.filter(e => e.activo).length;
+      const avMap = await Models.getWeekAvailability();
+      const available = Object.values(avMap || {}).filter(x => x && x.disponible).length;
+      const stats = await Models.getSystemStats?.() || {};
+      const rt = window.__HX_RUNTIME__ || {};
+      const todayCalls = stats.convocatorias_active ?? '—';
+
+      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
+        el('span', { class: 'exec-strip-value' }, String(todayCalls)),
+        el('span', { class: 'exec-strip-label' }, 'Convoc. hoy')
+      ));
+      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
+        el('span', { class: 'exec-strip-value' }, String(activeEmps)),
+        el('span', { class: 'exec-strip-label' }, 'Empleados activos')
+      ));
+      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
+        el('span', { class: 'exec-strip-value' }, String(available)),
+        el('span', { class: 'exec-strip-label' }, 'Disponibles')
+      ));
+      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
+        el('span', { class: 'exec-strip-value' }, String(stats.recuperos_pending ?? 0)),
+        el('span', { class: 'exec-strip-label' }, 'Recovery pend.')
+      ));
+      execStrip.appendChild(el('div', { class: 'exec-strip-item running' },
+        el('span', { class: 'exec-strip-value', style: 'font-size:12px;font-weight:600;' },
+          el('span', { class: 'exec-strip-badge', style: 'background:var(--success-bg);color:var(--success-fg);padding:1px 6px;border-radius:99px;' }, '● Operational')
+        ),
+        el('span', { class: 'exec-strip-label' }, rt.state || 'running')
+      ));
+
+      const cfg = await Models.getSystemConfig();
+      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
+        el('span', { class: 'exec-strip-value', style: 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;' }, (cfg.currentShiftWeek || '').toUpperCase()),
+        el('span', { class: 'exec-strip-label' }, 'Turno activo')
+      ));
+    } catch (e) {
+      console.error('Dashboard KPI load failed', e);
+    }
+  })();
+  sec.appendChild(execStrip);
+
   const kpiGrid = el('div', { class: 'stats-cards' });
-  // lightweight KPI cards (computed from models available functions)
   const makeCard = (title, value, icon) => el('div', { class: 'stat-card' }, el('div', { class: 'stat-icon' }, icon), el('div', { class: 'stat-value' }, String(value)), el('div', { class: 'stat-label' }, title));
 
   (async () => {
@@ -486,12 +532,12 @@ function buildTabDashboard() {
       const avMap = await Models.getWeekAvailability();
       const available = Object.values(avMap || {}).filter(x => x && x.disponible).length;
       const stats = await Models.getSystemStats?.() || {};
-      kpiGrid.appendChild(makeCard('Convocatorias activas', stats.convocatorias_active ?? '—', '📞'));
-      kpiGrid.appendChild(makeCard('Empleados (total)', totalEmps, '👥'));
-      kpiGrid.appendChild(makeCard('Empleados disponibles', available, '✅'));
-      kpiGrid.appendChild(makeCard('Recuperos pendientes', stats.recuperos_pending ?? '—', '🛠'));
+      kpiGrid.appendChild(makeCard('Convocatorias activas', stats.convocatorias_active ?? '—', createIcon('phone')));
+      kpiGrid.appendChild(makeCard('Empleados (total)', totalEmps, createIcon('user')));
+      kpiGrid.appendChild(makeCard('Empleados disponibles', available, createIcon('check')));
+      kpiGrid.appendChild(makeCard('Recuperos pendientes', stats.recuperos_pending ?? '—', createIcon('clock')));
     } catch (e) {
-      kpiGrid.appendChild(makeCard('Error KPI', '—', '⚠️'));
+      kpiGrid.appendChild(makeCard('Error KPI', '—', createIcon('warn')));
       console.error('Dashboard KPI load failed', e);
     }
   })();
@@ -708,6 +754,10 @@ async function mountUI() {
             el('span', { class: 'brand-name' }, 'Extras Celsur'),
             el('span', { class: 'brand-context' }, 'Op. Makro')
           )
+        ),
+        el('span', { id: 'runtime-badge', class: 'runtime-badge' },
+          el('span', { class: 'pulse-dot' }),
+          'running'
         )
       ),
       /* CENTER: Navigation tabs */
@@ -784,6 +834,7 @@ async function mountUI() {
   // Micro UX: initialize sticky header metrics and mobile mode handling
   try { initStickyHeader(); } catch (e) { console.warn('initStickyHeader failed', e); }
   try { initMobileMode(); } catch (e) { console.warn('initMobileMode failed', e); }
+  try { initRuntimeBadgeUpdater(); } catch (e) { console.warn('initRuntimeBadgeUpdater failed', e); }
 
   switchTab('empleados');
   // Cleanup old empty night events before rendering UI
@@ -826,6 +877,11 @@ async function mountUI() {
 }
 
 
+function initRuntimeBadgeUpdater() {
+  updateRuntimeBadge();
+  setInterval(updateRuntimeBadge, 4000);
+}
+
 async function refreshShiftIndicator() {
   const cfg = await Models.getSystemConfig();
   const el2 = $id('shift-indicator');
@@ -845,6 +901,17 @@ async function refreshShiftIndicator() {
       dot.title = 'Operational';
     }
   }
+}
+
+function updateRuntimeBadge() {
+  const badge = document.getElementById('runtime-badge');
+  if (!badge) return;
+  const rt = window.__HX_RUNTIME__ || {};
+  const degraded = rt.degraded || false;
+  badge.className = 'runtime-badge' + (degraded ? '' : ' running');
+  badge.innerHTML = degraded
+    ? '<span style="color:var(--warning-fg)">●</span> degraded'
+    : '<span class="pulse-dot"></span> running';
 }
 
 function renderAlertBar() {
@@ -898,7 +965,13 @@ function buildTabEmpleados() {
 
   const list = el('div', { id: 'employees-list' });
   sec.append(
-    el('h2', { class: 'section-title' }, 'Empleados'),
+    el('div', { class: 'flex-between mb-sm' },
+      el('h2', { class: 'section-title', style: 'margin-bottom:0;' }, 'Empleados'),
+      el('div', { class: 'flex-row gap-xs' },
+        el('span', { class: 'badge badge-success', id: 'emp-active-count' }, '— activos'),
+        el('span', { class: 'badge badge-muted', id: 'emp-total-count' }, '— total')
+      )
+    ),
     explainNode('Lista de empleados y métricas clave. Activá el Modo explicación para ver notas contextuales en cada sección.'),
     toolbar,
     list
@@ -916,7 +989,14 @@ async function renderEmployees() {
   const all = Array.isArray(allRaw) ? allRaw : Object.values(allRaw || {});
   // Compatibilidad: empleados antiguos sin `is_supervisor` deben considerarse false en UI
   for (const emp of all) { if (emp && emp.is_supervisor === undefined) emp.is_supervisor = false; }
-  console.log('RENDER EMPLEADOS CORREGIDO — ARRAY NORMALIZADO');
+
+  // Update active/total counts
+  const activeCount = all.filter(e => e.activo).length;
+  const totalCount = all.length;
+  const activeBadge = document.getElementById('emp-active-count');
+  const totalBadge = document.getElementById('emp-total-count');
+  if (activeBadge) activeBadge.textContent = activeCount + ' activos';
+  if (totalBadge) totalBadge.textContent = totalCount + ' total';
   const q = empSearch.toLowerCase();
   let filtered = q
     ? all.filter(e => (e.name || '').toLowerCase().includes(q) || e.id.includes(q))
@@ -924,7 +1004,15 @@ async function renderEmployees() {
   if (empTurnoFilter) filtered = filtered.filter(e => e.turno_base === empTurnoFilter);
 
   if (!filtered.length) {
-    cont.appendChild(el('div', { class: 'empty-state' }, 'No hay empleados coincidentes.'));
+    cont.appendChild(el('div', { class: 'empty-state' },
+      el('div', { class: 'empty-state-icon' }, createIcon('user')),
+      el('p', { class: 'empty-state-title' }, q ? 'Sin resultados para "' + q + '"' : 'Todavía no hay empleados cargados'),
+      el('p', { class: 'empty-state-desc' }, q ? 'Probá con otro nombre o ID.' : 'Agregá empleados desde el botón "+ Agregar empleado" o importá un archivo CSV/XLS.'),
+      !q ? el('div', { class: 'toolbar', style: 'justify-content:center;margin-top:4px;' },
+        el('button', { class: 'btn btn-primary btn-sm', onclick: openAddEmployeeModal }, '+ Agregar empleado'),
+        el('button', { class: 'btn btn-secondary btn-sm', onclick: openImportCsvModal }, 'Importar CSV/XLS')
+      ) : null
+    ));
     return;
   }
 
@@ -1914,7 +2002,17 @@ async function renderCallHistory() {
   cont.innerHTML = '';
   const state = await Models.exportState();
   const calls = Object.values(state.callEvents || {});
-  if (!calls.length) { cont.appendChild(el('div', { class: 'empty-state' }, 'No hay convocatorias registradas.')); return; }
+  if (!calls.length) {
+    cont.appendChild(el('div', { class: 'empty-state' },
+      el('div', { class: 'empty-state-icon' }, createIcon('phone')),
+      el('p', { class: 'empty-state-title' }, 'Sin convocatorias registradas'),
+      el('p', { class: 'empty-state-desc' }, 'Las convocatorias aparecerán acá cuando se creen desde la vista de empleados o desde el botón "Convocar".'),
+      el('div', { class: 'toolbar', style: 'justify-content:center;margin-top:4px;' },
+        el('button', { class: 'btn btn-primary btn-sm', onclick: () => switchTab('empleados') }, 'Ir a empleados')
+      )
+    ));
+    return;
+  }
 
   // Apply filters
   let filtered = calls.slice();
@@ -2117,12 +2215,15 @@ function buildTabSabados() {
   const sec = el('div', { id: 'tab-sabados', class: 'tab-section' });
   sec.classList.add('saturday-module');
   sec.append(
-    el('h2', { class: 'section-title' }, 'Sabados v1.2'),
-    explainNode('Módulo Sábados: seguimiento de intenciones, asignaciones y registros. Usá "Ver cómo funciona" para más detalles.'),
-    el('p', { class: 'section-desc' }, 'Módulo independiente de Sabados V1.2: Intenciones -> Asignaciones -> Registro -> Faltas/Recuperaciones.'),
-    el('div', { class: 'card config-card' },
-      el('h3', {}, 'Seleccionar sabado a gestionar'),
-      el('div', { class: 'toolbar' },
+    el('div', { class: 'flex-between mb-sm' },
+      el('h2', { class: 'section-title', style: 'margin-bottom:0;' }, 'Sábados v1.2'),
+      el('div', { class: 'flex-row gap-xs' },
+        featureOn('transparencyMode') && featureOn('saturdayRanking') ? el('button', { class: 'btn btn-ghost btn-sm', onclick: openSaturdayExplainModal }, '¿Cómo funciona?') : null
+      )
+    ),
+    el('p', { class: 'section-desc' }, 'Intenciones → Asignaciones → Registro → Faltas/Recuperaciones.'),
+    el('div', { class: 'card' },
+      el('div', { class: 'flex-row gap-sm' },
         el('input', {
           id: 'sat-mgmt-date', type: 'date', class: 'input-sm', 'aria-label': 'Seleccionar sábado a gestionar',
           value: defaultDateStr,
@@ -2131,25 +2232,24 @@ function buildTabSabados() {
             if (v) { satMgmtDate = v.replace(/-/g, '_'); renderSaturdayMgmtV12(); }
           }
         }),
-        el('button', { class: 'btn btn-primary', onclick: renderSaturdayMgmtV12 }, 'Ver')
+        el('button', { class: 'btn btn-primary btn-sm', onclick: renderSaturdayMgmtV12 }, 'Ver gestión')
       )
     ),
     el('div', { id: 'sat-mgmt-panel' }),
     featureOn('saturdayRanking')
-      ? el('h3', { class: 'section-subtitle' }, 'Ranking sabado y Acciones')
-      : null,
-    featureOn('saturdayRanking')
-      ? el('div', { class: 'card' },
-        el('div', { class: 'toolbar' },
-          el('button', { class: 'btn btn-secondary', onclick: renderRankingSabadoV12 }, 'Ver Ranking'),
-          featureOn('transparencyMode') ? el('button', { class: 'btn btn-info', onclick: openSaturdayExplainModal }, 'Ver cómo funciona') : null
+      ? el('div', { class: 'card mt-sm' },
+        el('div', { class: 'flex-between mb-sm' },
+          el('h4', {}, 'Ranking sábado'),
+          el('button', { class: 'btn btn-sm btn-secondary', onclick: renderRankingSabadoV12 }, 'Actualizar')
         ),
         el('div', { id: 'saturday-ranking-list' })
       )
       : null,
-    el('h3', { class: 'section-subtitle' }, 'Historial de sabados registrados'),
-    el('div', { class: 'card' },
-      el('button', { class: 'btn btn-secondary', onclick: renderSaturdayListV12 }, 'Actualizar'),
+    el('div', { class: 'card mt-sm' },
+      el('div', { class: 'flex-between mb-sm' },
+        el('h4', {}, 'Historial de sábados registrados'),
+        el('button', { class: 'btn btn-sm btn-secondary', onclick: renderSaturdayListV12 }, 'Actualizar')
+      ),
       el('div', { id: 'saturday-list' })
     )
   );
@@ -2167,7 +2267,7 @@ function buildTabTurnoNoche() {
   sec.append(
     el('h2', { class: 'section-title' }, 'Turno Noche — Excepcional'),
     explainNode('Crear y gestionar eventos Turno Noche. Independiente y compatible con modo offline.'),
-    el('div', { class: 'card config-card' },
+    el('div', { class: 'card' },
       el('h3', {}, 'Crear / Seleccionar evento'),
       el('div', { class: 'toolbar' },
         el('input', { id: 'night-date', type: 'date', class: 'input-sm', 'aria-label': 'Fecha del evento turno noche', onchange: () => {
@@ -3169,7 +3269,14 @@ async function renderRankingTable() {
   if (!featureOn('rankings')) return;
   if (isMobileMode()) { await renderRankingCards(); return; }
   const list = await Models.suggestionList();
-  if (!list.length) { cont.appendChild(el('div', { class: 'empty-state' }, 'No hay empleados activos.')); return; }
+  if (!list.length) {
+    cont.appendChild(el('div', { class: 'empty-state' },
+      el('div', { class: 'empty-state-icon' }, createIcon('user')),
+      el('p', { class: 'empty-state-title' }, 'Sin empleados activos'),
+      el('p', { class: 'empty-state-desc' }, 'No hay empleados activos para generar el ranking. Activá empleados desde la vista de empleados o cargá nuevos.')
+    ));
+    return;
+  }
 
   const tbl = el('table', { class: 'data-table' });
   tbl.appendChild(el('thead', {}, el('tr', {},
@@ -3208,7 +3315,14 @@ async function renderRankingCards() {
   cont.innerHTML = '';
   if (!featureOn('rankings')) return;
   const list = await Models.suggestionList();
-  if (!list.length) { cont.appendChild(el('div', { class: 'empty-state' }, 'No hay empleados activos.')); return; }
+  if (!list.length) {
+    cont.appendChild(el('div', { class: 'empty-state' },
+      el('div', { class: 'empty-state-icon' }, createIcon('user')),
+      el('p', { class: 'empty-state-title' }, 'Sin empleados activos'),
+      el('p', { class: 'empty-state-desc' }, 'Activá empleados desde la vista de empleados o cargá nuevos.')
+    ));
+    return;
+  }
   const topIds = list.slice(0, 10).map(x => x.id);
   const cards = el('div', { class: 'ranking-cards' });
   list.forEach((e, idx) => {
