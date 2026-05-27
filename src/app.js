@@ -11,32 +11,48 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+
+// FASE 2 — TRACE DE BOOT NUMERADO
+console.log('[BOOT-1] app.js module loading');
 import api from './api/apiLayer.js';
+console.log('[BOOT-2] apiLayer imported');
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
+console.log('[BOOT-3] config.js imported');
 import { isFeatureEnabled } from './config/features.js';
+console.log('[BOOT-4] features.js imported');
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './runtime.js';  <-- REACTIVADO para testing FASE 2.1
 import './runtime.js';
+console.log('[BOOT-5] runtime.js loaded');
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './runtime-ui.js';  <-- REACTIVADO para testing FASE 2.2
 import './runtime-ui.js';
+console.log('[BOOT-6] runtime-ui.js loaded');
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
+console.log('[BOOT-7] utils.js imported');
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './debug-panel.js';  <-- REACTIVADO para testing FASE 2.3
 import './debug-panel.js';
+console.log('[BOOT-8] debug-panel.js loaded');
 import runtimeDiagnostics from './runtimeDiagnostics.js';
+console.log('[BOOT-9] runtimeDiagnostics.js imported');
 import './storage/cleanup-lite.js';
+console.log('[BOOT-10] cleanup-lite.js loaded');
 import supervisor from './supervisor.js';
+console.log('[BOOT-11] supervisor.js imported');
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './live-intelligence.js';  <-- REACTIVADO para testing FASE 2.4
 import './live-intelligence.js';
+console.log('[BOOT-12] live-intelligence.js loaded');
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './operational-intelligence-v4.js';  <-- REACTIVADO para testing FASE 2.5
 import './operational-intelligence-v4.js';
+console.log('[BOOT-13] operational-intelligence-v4.js loaded');
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './strategic-operations-v5.js';  <-- REACTIVADO para testing FASE 2.6
 import './strategic-operations-v5.js';
+console.log('[BOOT-14] strategic-operations-v5.js loaded');
 
 // [AUDIT CRÍTICO] startupEnvironmentValidation COMENTADO - posible fuente de loops/observers
 /*
@@ -58,8 +74,18 @@ import './strategic-operations-v5.js';
 */
 
 import { normalizeId } from './utils_id.js';
+console.log('[BOOT-15] utils_id.js imported');
+console.log('[BOOT-15] utils_id.js imported');
+console.log('[BOOT-15] utils_id.js imported');
 import { initAuth, loginWithEmail, logout, getAuthDiagnostics, getCurrentUser } from './auth.js';
+console.log('[BOOT-16] auth.js imported');
+console.log('[BOOT-16] auth.js imported');
+console.log('[BOOT-16] auth.js imported');
 import { hasRole, canAccess, canExecuteOperation } from './permissions.js';
+console.log('[BOOT-17] permissions.js imported');
+console.log('[BOOT-18] All imports complete, starting initialization');
+console.log('[BOOT-17] permissions.js imported');
+console.log('[BOOT-17] permissions.js imported');
 
 // Initialize backend through the API boundary
 if (APP_CONFIG.STORAGE_BACKEND === 'supabase') {

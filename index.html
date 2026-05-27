@@ -36,12 +36,60 @@
 
     <!-- Captura errores críticos de módulos antes de que el app arranque -->
     <script>
-      window.addEventListener('error', function(e) {
-        console.error('[global-error]', e.message, e.filename, e.lineno);
-      });
-      window.addEventListener('unhandledrejection', function(e) {
-        console.error('[unhandled-rejection]', e.reason);
-      });
+      // FASE 1 — CAPTURA TOTAL DE ERRORES CON OVERLAY FULLSCREEN
+      (function() {
+        var errorOverlay = null;
+        
+        function createErrorOverlay() {
+          if (errorOverlay) return errorOverlay;
+          errorOverlay = document.createElement('div');
+          errorOverlay.id = 'fatal-error-overlay';
+          errorOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#1a0505;color:#ff6b6b;z-index:999999;font-family:monospace;padding:20px;overflow:auto;display:flex;flex-direction:column;gap:10px;';
+          errorOverlay.innerHTML = '<h1 style="margin:0;padding:10px;background:#dc2626;color:white;font-size:18px;">⚠️ ERROR CRÍTICO DETECTADO</h1><div id="error-details" style="flex:1;"></div>';
+          document.body.appendChild(errorOverlay);
+          return errorOverlay;
+        }
+        
+        function showError(message, source, lineno, colno, stack) {
+          var overlay = createErrorOverlay();
+          var details = document.getElementById('error-details');
+          if (!details) return;
+          
+          var errorInfo = document.createElement('div');
+          errorInfo.style.cssText = 'background:#2a0a0a;border:1px solid #dc2626;padding:15px;margin-bottom:10px;';
+          errorInfo.innerHTML = 
+            '<div style="font-size:14px;font-weight:bold;margin-bottom:8px;">🔴 ' + escapeHtml(message) + '</div>' +
+            '<div style="font-size:12px;color:#fca5a5;">📁 Archivo: ' + escapeHtml(source || 'unknown') + '</div>' +
+            '<div style="font-size:12px;color:#fca5a5;">📍 Línea: ' + lineno + ' Columna: ' + colno + '</div>' +
+            (stack ? '<pre style="font-size:11px;color:#fbbf24;white-space:pre-wrap;margin-top:8px;background:#1a0505;padding:10px;">' + escapeHtml(stack) + '</pre>' : '') +
+            '<div style="font-size:10px;color:#999;margin-top:8px;">Timestamp: ' + new Date().toISOString() + '</div>';
+          
+          details.insertBefore(errorInfo, details.firstChild);
+          console.error('[FATAL-ERROR]', message, source, lineno, stack);
+        }
+        
+        function escapeHtml(str) {
+          if (!str) return '';
+          return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        
+        window.onerror = function(message, source, lineno, colno, error) {
+          console.error('[global-error]', message, source, lineno, colno);
+          showError(message, source, lineno, colno, error && error.stack ? error.stack : '');
+          return false;
+        };
+        
+        window.onunhandledrejection = function(e) {
+          var reason = e.reason;
+          var message = reason && reason.message ? reason.message : String(reason);
+          var stack = reason && reason.stack ? reason.stack : '';
+          console.error('[unhandled-rejection]', reason);
+          showError('Unhandled Promise Rejection: ' + message, '', 0, 0, stack);
+          e.preventDefault();
+        };
+        
+        console.log('[BOOT-TRACE] Global error listeners installed');
+      })();
     </script>
 
     <!-- Firebase CDN: expone módulos globalmente antes de cargar la app -->
