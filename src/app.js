@@ -15,12 +15,16 @@ import api from './api/apiLayer.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
 import { isFeatureEnabled } from './config/features.js';
 import './runtime.js';
+import './runtime-ui.js';
 const Models = api;
 import { toCSV, parseCSV, makeFilename, downloadBlob, toXLS, debugLog } from './utils.js';
 import './debug-panel.js';
 import runtimeDiagnostics from './runtimeDiagnostics.js';
 import './storage/cleanup-lite.js';
 import supervisor from './supervisor.js';
+import './live-intelligence.js';
+import './operational-intelligence-v4.js';
+import './strategic-operations-v5.js';
 
 (function startupEnvironmentValidation(){
   try {
@@ -132,29 +136,35 @@ async function getDiasDisponiblesEmpleado(empOrId, weekKey = null, avMap = null)
 
 // ─── Helpers: microexplicaciones / iconos ───────────────────────────────────
 function createIcon(name, title = '') {
-  // lightweight inline SVG icon system (progressive replacement of emojis)
   const icons = {
-    info: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M11.25 10h1.5v5.25h-1.5V10zM12 7.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/></svg>',
-    check: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    cross: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    warn: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="1.2" fill="currentColor"/></svg>',
-    home: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11.5L12 4l9 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 21V12h14v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    calendar: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M16 3v4M8 3v4M3 11h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-    chart: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3v18h18" stroke="currentColor" stroke-width="1.5"/><path d="M7 13v5M12 8v10M17 3v15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-    user: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/></svg>',
-    gear: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.4 15a1.7 1.7 0 00.34 1.82l.06.06a1 1 0 01-1.41 1.42l-.06-.06a1.7 1.7 0 00-1.82-.34 1.7 1.7 0 00-1 1.56V21a1 1 0 01-2 0v-.2a1.7 1.7 0 00-1-1.56 1.7 1.7 0 00-1.82.34l-.06.06A1 1 0 013.8 16.88l.06-.06A1.7 1.7 0 004.2 15a1.7 1.7 0 00-1.56-1H2a1 1 0 010-2h.64A1.7 1.7 0 004.2 10a1.7 1.7 0 00-.34-1.82L4 8.12A1 1 0 015.45 6.7l.06.06A1.7 1.7 0 007.33 6a1.7 1.7 0 001.56-1V4a1 1 0 012 0v.2c.22.65.79 1.16 1.45 1.16.66 0 1.23-.51 1.45-1.16V4a1 1 0 012 0v.2c.22.65.79 1.16 1.45 1.16.66 0 1.23-.51 1.45-1.16V4a1 1 0 012 0v.2c0 .66.48 1.2 1.12 1.28" stroke="currentColor" stroke-width="1.2"/></svg>',
-    trophy: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 3h8v2a4 4 0 01-4 4 4 4 0 01-4-4V3z" stroke="currentColor" stroke-width="1.5"/><path d="M3 8v2a6 6 0 006 6h6a6 6 0 006-6V8" stroke="currentColor" stroke-width="1.5"/><path d="M8 21h8" stroke="currentColor" stroke-width="1.5"/></svg>',
-    medal1: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="9" r="4" stroke="currentColor" stroke-width="1.2" fill="currentColor"/><path d="M8 14l-2 6h12l-2-6" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>',
-    medal2: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="9" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 14l-2 6h12l-2-6" stroke="currentColor" stroke-width="1.2" fill="currentColor" opacity="0.9"/></svg>',
-    medal3: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="9" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 14l-2 6h12l-2-6" stroke="currentColor" stroke-width="1.2" fill="currentColor" opacity="0.6"/></svg>',
-    clock: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 7v6l4 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    money: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 9v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 8h4M10 16h4" stroke="currentColor" stroke-width="1.0" stroke-linecap="round"/></svg>',
-    star: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l2.6 6.8L21 10l-5 3.7L17.2 22 12 18.6 6.8 22 8 13.7 3 10l6.4-1.2L12 2z" stroke="currentColor" stroke-width="0.6" fill="currentColor"/></svg>',
-    moon: '<svg class="hx-ico" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" stroke="currentColor" stroke-width="1.0" fill="currentColor"/></svg>',
-    plus: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    smartphone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="2" width="12" height="20" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M12 18h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-    download: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M12 3v12M8 11l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    phone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    info: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+    check: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    cross: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    warn: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    home: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+    calendar: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    chart: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    user: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    gear: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
+    trophy: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 010-5H6"/><path d="M18 9h1.5a2.5 2.5 0 000-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0012 0V2z"/></svg>',
+    medal1: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.11"/></svg>',
+    medal2: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.11"/></svg>',
+    medal3: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.11"/></svg>',
+    clock: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    money: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>',
+    star: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    moon: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>',
+    plus: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    smartphone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+    download: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    phone: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>',
+    search: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    reload: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
+    edit: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    trash: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
+    alert: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>',
+    shield: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    activity: '<svg class="hx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
   };
   const raw = icons[name] || icons.info || 'ℹ️';
   const markup = raw.replace('<svg ', '<svg aria-hidden="true" ');
@@ -280,16 +290,55 @@ function showModal(title, bodyNode, buttons = []) {
 function closeModal() {
   const bd = $id('modal_backdrop');
   if (!bd) return;
-  // play closing animation when available, then remove
   try {
     bd.classList.add('closing');
     setTimeout(() => {
       bd.remove();
-      // Restaurar foco al elemento que abrió el modal
       try { if (window.__lastFocusedEl && typeof window.__lastFocusedEl.focus === 'function') window.__lastFocusedEl.focus(); } catch(e) {}
       window.__lastFocusedEl = null;
     }, 180);
   } catch (e) { bd.remove(); }
+}
+
+// ─── Executive Modal (variante premium) ───────────────────────────────────
+function showExecutiveModal(title, bodyNode, buttons = [], summaryItems = []) {
+  closeModal();
+  const backdrop = el('div', { class: 'modal-backdrop', id: 'modal_backdrop' });
+  const titleId = 'modal-title-' + Date.now();
+  const closeBtn = el('button', { class: 'modal-close', 'aria-label': 'Cerrar', onclick: closeModal },
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>'
+  );
+  const header = el('div', { class: 'modal-header' }, el('h3', { class: 'modal-title', id: titleId }, title), closeBtn);
+  const body = el('div', { class: 'modal-body' });
+
+  if (summaryItems.length) {
+    const summaryGrid = el('div', { class: 'exec-modal-summary' });
+    summaryItems.forEach(item => {
+      summaryGrid.appendChild(el('div', { class: 'exec-modal-summary-item' },
+        el('span', { class: 'exec-modal-summary-label' }, item.label),
+        el('span', { class: 'exec-modal-summary-value', style: item.color ? 'color:' + item.color : '' }, String(item.value))
+      ));
+    });
+    body.appendChild(summaryGrid);
+  }
+
+  body.appendChild(bodyNode);
+  const footer = el('div', { class: 'modal-footer' });
+  for (const b of buttons) {
+    const btn = el('button', { class: b.cls || 'btn btn-primary', onclick: () => b.action?.() }, b.label);
+    footer.appendChild(btn);
+  }
+  const modal = el('div', { class: 'modal exec-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId }, header, body, footer);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closeModal(); });
+  const escHandler = (e) => { if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); } };
+  document.addEventListener('keydown', escHandler);
+  setTimeout(() => {
+    const focusable = modal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length) focusable[0].focus();
+  }, 50);
+  window.__lastFocusedEl = document.activeElement;
 }
 
 
@@ -301,6 +350,256 @@ function confirmModal(msg, onConfirm) {
     { label: 'Cancelar', cls: 'btn btn-secondary', action: closeModal },
     { label: 'Confirmar', cls: 'btn btn-danger', action: () => { closeModal(); onConfirm(); } },
   ]);
+}
+
+// ─── COMMAND PALETTE ────────────────────────────────────────────────────────
+
+function openCommandPalette() {
+  const existing = document.getElementById('cmd-palette-backdrop');
+  if (existing) { existing.remove(); return; }
+
+  const backdrop = el('div', { class: 'command-palette-backdrop', id: 'cmd-palette-backdrop' });
+  const palette = el('div', { class: 'command-palette' });
+
+  const searchInput = el('input', {
+    class: 'command-palette-input', type: 'text',
+    placeholder: 'Buscar acción…', id: 'cmd-palette-input',
+    autocomplete: 'off', spellcheck: 'false'
+  });
+
+  const inputWrap = el('div', { class: 'command-palette-input-wrap' },
+    createIcon('info', 'Buscar'),
+    searchInput
+  );
+
+  const groupsContainer = el('div', { class: 'command-palette-groups', id: 'cmd-palette-groups' });
+
+  palette.append(inputWrap, groupsContainer);
+  backdrop.appendChild(palette);
+  document.body.appendChild(backdrop);
+
+  const commands = [
+    { group: 'Acciones rápidas', items: [
+      { label: 'Nueva convocatoria', icon: 'phone', action: () => { closeCommandPalette(); switchTab('convocatorias'); } },
+      { label: 'Generar ranking', icon: 'trophy', action: () => { closeCommandPalette(); switchTab('estadisticas'); } },
+      { label: 'Ver empleados', icon: 'user', action: () => { closeCommandPalette(); switchTab('empleados'); } },
+      { label: 'Planificación semanal', icon: 'calendar', action: () => { closeCommandPalette(); switchTab('semana'); } },
+      { label: 'Gestión sábados', icon: 'calendar', action: () => { closeCommandPalette(); switchTab('sabados'); } },
+    ]},
+    { group: 'Operaciones', items: [
+      { label: 'Ejecutar recovery', icon: 'check', action: () => { closeCommandPalette(); toast('Recovery iniciado', 'info'); } },
+      { label: 'Exportar estado', icon: 'download', action: () => { closeCommandPalette(); const b = new Blob([JSON.stringify({ exported: 'data' })], { type: 'application/json' }); downloadBlob(b, 'export.json'); } },
+      { label: 'Ver dashboard', icon: 'chart', action: () => { closeCommandPalette(); switchTab('dashboard'); } },
+      { label: 'Ver alertas', icon: 'warn', action: () => { closeCommandPalette(); switchTab('supervisor'); } },
+    ]},
+    { group: 'Configuración', items: [
+      { label: 'Ajustes', icon: 'gear', action: () => { closeCommandPalette(); switchTab('config'); } },
+      { label: 'Turno noche', icon: 'moon', action: () => { closeCommandPalette(); switchTab('turno_noche'); } },
+    ]}
+  ];
+
+  function renderCommands(filter = '') {
+    groupsContainer.innerHTML = '';
+    const q = filter.toLowerCase().trim();
+    let hasResults = false;
+    commands.forEach(group => {
+      const filtered = group.items.filter(c => !q || c.label.toLowerCase().includes(q));
+      if (!filtered.length) return;
+      hasResults = true;
+      const groupEl = el('div', {},
+        el('div', { class: 'command-palette-group-label' }, group.group)
+      );
+      filtered.forEach(cmd => {
+        const item = el('div', { class: 'command-palette-item', onclick: cmd.action },
+          createIcon(cmd.icon),
+          el('span', { class: 'cmd-item-label' }, cmd.label)
+        );
+        groupEl.appendChild(item);
+      });
+      groupsContainer.appendChild(groupEl);
+    });
+    if (!hasResults) {
+      groupsContainer.appendChild(
+        el('div', { class: 'command-palette-empty' }, 'Sin resultados')
+      );
+    }
+  }
+
+  renderCommands();
+
+  searchInput.addEventListener('input', () => renderCommands(searchInput.value));
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeCommandPalette();
+    if (e.key === 'Enter') {
+      const firstItem = groupsContainer.querySelector('.command-palette-item');
+      if (firstItem) { firstItem.click(); }
+    }
+  });
+
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeCommandPalette(); });
+  setTimeout(() => { searchInput.focus(); }, 50);
+}
+
+function closeCommandPalette() {
+  const bd = document.getElementById('cmd-palette-backdrop');
+  if (!bd) return;
+  bd.classList.add('closing');
+  setTimeout(() => bd.remove(), 150);
+}
+
+// ─── OPERATIONAL ALERT CENTER ──────────────────────────────────────────────
+
+let operationalAlerts = [];
+
+function addOperationalAlert(type, title, desc, priority = 'medium') {
+  const alert = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 6), type, title, desc, ts: Date.now(), priority, dismissed: false };
+  operationalAlerts.unshift(alert);
+  if (operationalAlerts.length > 50) operationalAlerts.length = 50;
+  renderAlertCenter();
+  return alert;
+}
+
+function dismissOperationalAlert(id) {
+  const idx = operationalAlerts.findIndex(a => a.id === id);
+  if (idx > -1) { operationalAlerts.splice(idx, 1); renderAlertCenter(); }
+}
+
+function renderAlertCenter(rootId = 'hx-alert-center') {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  root.innerHTML = '';
+
+  if (!operationalAlerts.length) {
+    root.appendChild(el('div', { class: 'v4-smart-empty', style: 'margin-top:0;border-style:dashed;' },
+      el('div', { class: 'v4-se-icon' }, el('span', { class: 'v4-se-icon-symbol' }, '✓')),
+      el('p', { class: 'v4-se-title' }, 'El sistema está estable'),
+      el('p', { class: 'v4-se-desc' }, 'No hay alertas operacionales activas. El runtime opera normalmente.')
+    ));
+    return;
+  }
+
+  const active = operationalAlerts.filter(a => !a.dismissed);
+  if (!active.length) {
+    root.appendChild(el('div', { class: 'v4-smart-empty', style: 'margin-top:0;border-style:dashed;' },
+      el('div', { class: 'v4-se-icon' }, el('span', { class: 'v4-se-icon-symbol' }, '✓')),
+      el('p', { class: 'v4-se-title' }, 'Todas las alertas resueltas'),
+      el('p', { class: 'v4-se-desc' }, 'Las incidencias fueron gestionadas. No hay pendientes.')
+    ));
+    return;
+  }
+
+  active.forEach(a => {
+    const item = el('div', { class: `alert-center-item ${a.priority}` },
+      el('div', { class: 'alert-ico' }, createIcon(a.type === 'error' || a.priority === 'critical' ? 'warn' : 'info')),
+      el('div', { class: 'alert-body' },
+        el('div', { class: 'alert-title' }, a.title),
+        el('div', { class: 'alert-desc' }, a.desc)
+      ),
+      el('span', { class: 'alert-time' }, getRelativeTime(a.ts)),
+      el('button', { class: 'alert-dismiss-btn', onclick: (e) => { e.stopPropagation(); dismissOperationalAlert(a.id); }, title: 'Descartar' }, '✕')
+    );
+    root.appendChild(item);
+  });
+}
+
+function getRelativeTime(ts) {
+  const diff = Date.now() - ts;
+  if (diff < 2000) return 'ahora';
+  if (diff < 60000) return Math.floor(diff / 1000) + 's';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'min';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h';
+  return Math.floor(diff / 86400000) + 'd';
+}
+
+// ─── LIVE SYSTEM PRESENCE UPDATER ─────────────────────────────────────────
+
+function initLivePresence() {
+  setInterval(updateLiveIndicators, 4000);
+  updateLiveIndicators();
+}
+
+function updateLiveIndicators() {
+  const rt = window.__HX_RUNTIME__ || {};
+  const healthDot = document.getElementById('hx-health-dot');
+  if (healthDot) {
+    const degraded = rt.degraded || false;
+    const hasWarnings = (rt.retries?.count || 0) > 3 || (rt.conflicts?.length || 0) > 2;
+    if (degraded) {
+      healthDot.className = 'hx-rb-health-dot error';
+    } else if (hasWarnings) {
+      healthDot.className = 'hx-rb-health-dot warning';
+    } else {
+      healthDot.className = 'hx-rb-health-dot';
+    }
+  }
+
+  const counterEls = document.querySelectorAll('.live-counter');
+  counterEls.forEach(el => {
+    const key = el.dataset.live;
+    if (key === 'retries') el.textContent = String(rt.retries?.count || 0);
+    if (key === 'conflicts') el.textContent = String(rt.conflicts?.length || 0);
+    if (key === 'uptime') {
+      const initTs = rt._initTs || window.__HX_RUNTIME__?._initTs;
+      if (initTs) {
+        const secs = Math.floor((Date.now() - initTs) / 1000);
+        el.textContent = secs < 60 ? secs + 's' : Math.floor(secs / 60) + 'min';
+      }
+    }
+  });
+}
+
+// ─── EXECUTIVE COMMAND BAR BUILDER ─────────────────────────────────────────
+
+function buildExecCommandBar() {
+  return el('div', { class: 'exec-command-bar', id: 'exec-command-bar' },
+    el('div', { class: 'exec-command-bar-inner' },
+      el('button', { class: 'exec-command-trigger', onclick: openCommandPalette,
+        title: 'Abrir paleta de comandos' },
+        createIcon('info', 'Comandos'),
+        'Comandos',
+        el('span', { class: 'kbd' }, '⌘K')
+      ),
+      el('div', { class: 'exec-command-divider' }),
+      el('div', { class: 'exec-command-actions' },
+        el('button', { class: 'exec-cmd-btn exec-cmd-primary', onclick: () => switchTab('convocatorias') },
+          createIcon('plus', 'Convocar'), 'Convocar ahora'
+        ),
+        el('button', { class: 'exec-cmd-btn', onclick: () => switchTab('estadisticas') },
+          createIcon('trophy', 'Ranking'), 'Ranking'
+        ),
+        el('button', { class: 'exec-cmd-btn', onclick: () => { addOperationalAlert('info', 'Recovery manual', 'Recovery iniciado desde command bar', 'high'); toast('Recovery iniciado', 'info'); } },
+          createIcon('check', 'Recovery'), 'Recovery'
+        ),
+        el('button', { class: 'exec-cmd-btn', onclick: () => { const b = new Blob([JSON.stringify({ exported: 'data' })], { type: 'application/json' }); downloadBlob(b, 'export.json'); } },
+          createIcon('download', 'Exportar'), 'Exportar estado'
+        ),
+        el('button', { class: 'exec-cmd-btn', onclick: () => switchTab('supervisor') },
+          createIcon('warn', 'Alertas'), 'Ver alertas'
+        ),
+        el('button', { class: 'exec-cmd-btn', onclick: () => switchTab('dashboard') },
+          createIcon('chart', 'Dashboard'), 'Dashboard'
+        )
+      )
+    )
+  );
+}
+
+// ─── BOTTOM EXECUTIVE BAR (mobile) ─────────────────────────────────────────
+
+function buildBottomExecBar() {
+  return el('div', { class: 'exec-bottom-bar', id: 'exec-bottom-bar' },
+    el('div', { class: 'exec-bottom-left' },
+      el('button', { class: 'exec-bottom-action', onclick: openCommandPalette },
+        createIcon('info', 'Comandos'), 'Comandos'
+      ),
+      el('button', { class: 'exec-bottom-action', onclick: () => switchTab('convocatorias') },
+        createIcon('plus', 'Convocar'), 'Convocar'
+      )
+    ),
+    el('div', { class: 'exec-bottom-right' },
+      el('span', { class: 'live-counter', 'data-live': 'uptime', id: 'mobile-uptime' }, '—')
+    )
+  );
 }
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
@@ -317,9 +616,28 @@ function switchTab(tab) {
     }
   } catch (e) { /* ignore guard errors */ }
 
+  // Premium tab transition: opacity + transform with micro-spring
+  const prevTab = document.querySelector('.tab-section.tab-visible');
+  const nextSec = $id('tab-' + tab);
+  if (prevTab && prevTab !== nextSec) {
+    prevTab.classList.remove('tab-visible');
+    prevTab.style.opacity = '0';
+    setTimeout(() => { prevTab.style.display = 'none'; }, 150);
+  }
   for (const t of TABS) {
     const sec = $id('tab-' + t);
-    if (sec) sec.style.display = t === tab ? '' : 'none';
+    if (!sec) continue;
+    if (t === tab) {
+      sec.style.display = '';
+      sec.style.opacity = '0';
+      requestAnimationFrame(() => {
+        sec.classList.add('tab-visible');
+        sec.style.opacity = '1';
+      });
+    } else if (sec !== prevTab) {
+      sec.classList.remove('tab-visible');
+      sec.style.display = 'none';
+    }
   }
   document.querySelectorAll('.nav-tab').forEach(btn =>
     btn.classList.toggle('active', btn.dataset.tab === tab)
@@ -328,6 +646,17 @@ function switchTab(tab) {
     btn.classList.toggle('active', btn.dataset.tab === tab)
   );
   if (tab === 'semana') renderWeekPlanner();
+  if (tab === 'dashboard') {
+    setTimeout(() => {
+      try {
+        if (window.__HX_LIVE_INTELLIGENCE__) {
+          window.__HX_LIVE_INTELLIGENCE__.refreshIntel();
+          window.__HX_LIVE_INTELLIGENCE__.refreshRuntime();
+          window.__HX_LIVE_INTELLIGENCE__.refreshAlerts();
+        }
+      } catch(e) {}
+    }, 200);
+  }
 }
 
 // ─── Estado de UI local ──────────────────────────────────────────────────────
@@ -437,7 +766,7 @@ async function buildMobileHomeQuickActions() {
     const list = await Models.suggestionList();
     const top5 = list.slice(0, 5);
     miniRanking = el('div', { class: 'mobile-ranking-mini' },
-      el('h4', {}, '🏆 Top empleados')
+      el('h4', { class: 'with-icon' }, createIcon('trophy'), ' Top empleados')
     );
     if (!top5.length) {
       miniRanking.appendChild(el('p', { class: 'muted' }, 'Sin empleados activos.'));
@@ -456,12 +785,12 @@ async function buildMobileHomeQuickActions() {
     el('p', { class: 'mobile-quick-section-title' }, 'Acciones rápidas'),
     featureOn('rankings')
       ? el('button', { class: 'btn btn-primary', onclick: () => { switchTab('estadisticas'); setTimeout(renderStats, 50); } },
-        '🎯  Generar sugerencia')
+        createIcon('chart'), ' Generar sugerencia')
       : null,
     el('button', { class: 'btn btn-info', onclick: () => switchTab('convocatorias') },
-      '📞  Registrar intento'),
+      createIcon('phone'), ' Registrar intento'),
     el('button', { class: 'btn btn-danger', onclick: () => switchTab('convocatorias') },
-      '❌  Registrar falta')
+      createIcon('cross'), ' Registrar falta')
   );
   wrap.append(miniRanking, actions);
   return wrap;
@@ -471,166 +800,216 @@ async function buildMobileHomeQuickActions() {
 
 function buildTabDashboard() {
   const sec = el('div', { id: 'tab-dashboard', class: 'tab-section' });
-  sec.appendChild(el('h2', { class: 'section-title' }, 'Dashboard Operacional'));
-  sec.appendChild(el('p', { class: 'section-desc' }, 'Visión rápida: estado runtime, KPIs operacionales y alertas críticas.'));
 
-  const execStrip = el('div', { class: 'exec-strip' });
-  (async () => {
-    try {
-      const emps = await Models.listEmployees();
-      const all = Array.isArray(emps) ? emps : Object.values(emps || {});
-      const totalEmps = all.length;
-      const activeEmps = all.filter(e => e.activo).length;
-      const avMap = await Models.getWeekAvailability();
-      const available = Object.values(avMap || {}).filter(x => x && x.disponible).length;
-      const stats = await Models.getSystemStats?.() || {};
-      const rt = window.__HX_RUNTIME__ || {};
-      const todayCalls = stats.convocatorias_active ?? '—';
+  // Executive page header
+  sec.appendChild(el('div', { class: 'flex-between mb-sm' },
+    el('div', {},
+      el('h2', { class: 'section-title', style: 'margin-bottom:0;' }, 'Dashboard estratégico'),
+      el('span', { class: 'section-desc', style: 'margin-bottom:0;' }, 'Visión ejecutiva — estado operacional, riesgos, decisiones y telemetría.')
+    ),
+    el('div', { class: 'flex-row gap-xs' },
+      el('span', { class: 'hx-op-badge healthy', id: 'hx-dash-op-badge' }, '● HEALTHY'),
+      el('button', {
+        class: 'btn btn-sm btn-secondary',
+        onclick: () => {
+          const v5 = window.__HX_V5__;
+          if (v5) {
+            v5.computeStrategicOverview().then(overview => {
+              if (!overview) return;
+              const v4 = window.__HX_V4__;
+              if (v4) {
+                const tone = v4.getOperationalTone(overview.operationalReadiness.stability === 'healthy' ? 'HEALTHY' : 'WARNING');
+                showExecutiveModal('Resumen estratégico',
+                  el('div', {},
+                    el('p', {}, 'Disponibilidad: ' + overview.operationalReadiness.availability + ' empleados'),
+                    el('p', {}, 'Estabilidad: ' + overview.operationalReadiness.stability),
+                    el('p', {}, 'Riesgo: ' + overview.operationalReadiness.riskLevel),
+                    el('p', {}, 'Rep. promedio: ' + overview.workforceHealth.avgReputation + '/100'),
+                    el('p', {}, 'Críticos: ' + overview.workforceHealth.criticalEmployees),
+                    el('p', {}, 'Recovery pend.: ' + overview.workforceHealth.monthlyRecovery),
+                  ),
+                  [{ label: 'Cerrar', cls: 'btn btn-primary', action: closeModal }],
+                  [
+                    { label: 'Estado', value: tone.label, color: 'var(--success-fg)' },
+                    { label: 'Disponibles', value: String(overview.operationalReadiness.availability) },
+                    { label: 'Críticos', value: String(overview.workforceHealth.criticalEmployees) },
+                    { label: 'Recovery', value: String(overview.workforceHealth.monthlyRecovery) },
+                  ]
+                );
+              }
+            });
+          }
+        }
+      }, 'Resumen ejecutivo')
+    )
+  ));
 
-      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
-        el('span', { class: 'exec-strip-value' }, String(todayCalls)),
-        el('span', { class: 'exec-strip-label' }, 'Convoc. hoy')
-      ));
-      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
-        el('span', { class: 'exec-strip-value' }, String(activeEmps)),
-        el('span', { class: 'exec-strip-label' }, 'Empleados activos')
-      ));
-      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
-        el('span', { class: 'exec-strip-value' }, String(available)),
-        el('span', { class: 'exec-strip-label' }, 'Disponibles')
-      ));
-      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
-        el('span', { class: 'exec-strip-value' }, String(stats.recuperos_pending ?? 0)),
-        el('span', { class: 'exec-strip-label' }, 'Recovery pend.')
-      ));
-      execStrip.appendChild(el('div', { class: 'exec-strip-item running' },
-        el('span', { class: 'exec-strip-value', style: 'font-size:12px;font-weight:600;' },
-          el('span', { class: 'exec-strip-badge', style: 'background:var(--success-bg);color:var(--success-fg);padding:1px 6px;border-radius:99px;' }, '● Operational')
-        ),
-        el('span', { class: 'exec-strip-label' }, rt.state || 'running')
-      ));
+  // Strategic Workspace (V5)
+  const v5 = window.__HX_V5__;
+  if (v5) {
+    const workspace = v5.buildWorkspaceDashboard();
+    workspace.id = 'v5-workspace-root';
+    sec.appendChild(workspace);
+  } else {
+    // Fallback: compact grid
+    const fallbackGrid = el('div', { class: 'hx-dash-compact', id: 'hx-dash-compact' });
+    fallbackGrid.innerHTML = `<div class="sk-grid"><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div></div>`;
+    sec.appendChild(fallbackGrid);
 
-      const cfg = await Models.getSystemConfig();
-      execStrip.appendChild(el('div', { class: 'exec-strip-item' },
-        el('span', { class: 'exec-strip-value', style: 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;' }, (cfg.currentShiftWeek || '').toUpperCase()),
-        el('span', { class: 'exec-strip-label' }, 'Turno activo')
-      ));
-    } catch (e) {
-      console.error('Dashboard KPI load failed', e);
+    (async () => {
+      try {
+        const [emps, avMap, stats, cfg] = await Promise.all([
+          Models.listEmployees().catch(() => []),
+          Models.getWeekAvailability().catch(() => ({})),
+          Models.getSystemStats?.().catch(() => ({})),
+          Models.getSystemConfig().catch(() => ({})),
+        ]);
+        const all = Array.isArray(emps) ? emps : Object.values(emps || {});
+        const totalEmps = all.length;
+        const activeEmps = all.filter(e => e.activo).length;
+        const available = Object.values(avMap || {}).filter(x => x && x.disponible).length;
+        const todayCalls = stats.convocatorias_active ?? '—';
+        const recoveryPend = stats.recuperos_pending ?? 0;
+        const shiftWeek = (cfg.currentShiftWeek || '').toUpperCase();
+        const avgRep = all.length
+          ? Math.round(all.reduce((s, e) => s + (Number(e.reputation) || 0), 0) / all.length)
+          : '—';
+
+        fallbackGrid.innerHTML = '';
+        const cards = [
+          { value: String(todayCalls), label: 'Convoc. hoy', icon: 'phone' },
+          { value: String(activeEmps), label: 'Empleados activos', icon: 'user' },
+          { value: String(available), label: 'Disponibles', icon: 'check' },
+          { value: String(recoveryPend), label: 'Recovery pend.', icon: 'clock' },
+          { value: avgRep + '/100', label: 'Reputación promedio', icon: 'star' },
+          { value: shiftWeek, label: 'Turno activo', icon: 'calendar', small: true },
+        ];
+
+        cards.forEach(c => {
+          const icon = createIcon(c.icon);
+          fallbackGrid.appendChild(el('div', { class: 'hx-dash-card' },
+            el('div', { class: 'hx-dash-card-icon' }, icon),
+            el('div', { class: 'hx-dash-card-body' },
+              el('span', { class: 'hx-dash-card-value', style: c.small ? 'font-size:12px;text-transform:uppercase;letter-spacing:0.03em;' : '' }, c.value),
+              el('span', { class: 'hx-dash-card-label' }, c.label)
+            )
+          ));
+        });
+      } catch (e) { fallbackGrid.innerHTML = '<div class="muted">Error cargando datos</div>'; }
+    })();
+  }
+
+  // Activity feed + predictive alerts section (V4 compatibility)
+  const bottomRow = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);margin-top:var(--space-2);' });
+
+  // Activity feed (compact)
+  const feedCard = el('div', { class: 'card', style: 'margin-bottom:0;' },
+    el('div', { class: 'flex-between mb-xs' },
+      el('h4', {}, 'Actividad'),
+      el('span', { class: 'hx-op-badge healthy', id: 'hx-dash-op-badge-2', style: 'display:none;' })
+    ),
+    el('div', { class: 'hx-feed-container', id: 'hx-activity-feed' },
+      el('div', { class: 'sk-exec' })
+    )
+  );
+  bottomRow.appendChild(feedCard);
+
+  // Predictive alerts (compact)
+  const predCard = el('div', { class: 'card', style: 'margin-bottom:0;' },
+    el('div', { class: 'flex-between mb-xs' },
+      el('h4', {}, 'Alertas predictivas'),
+      el('span', { class: 'v4-tl-badge', id: 'v4-pa-count' }, '0')
+    ),
+    el('div', { class: 'v4-predictive-scroll', id: 'v4-predictive-panel' },
+      el('div', { class: 'v4-pa-empty' }, 'Analizando...')
+    )
+  );
+  bottomRow.appendChild(predCard);
+
+  sec.appendChild(bottomRow);
+
+  // Telemetry toggle (collapsible, kept for advanced diagnostics)
+  const telemetrySection = el('div', { class: 'hx-telemetry-panel mt-sm' },
+    el('button', { class: 'hx-telemetry-toggle', id: 'hx-telemetry-toggle',
+      onclick: function() {
+        const body = document.getElementById('hx-telemetry-body');
+        if (body) {
+          body.classList.toggle('open');
+          this.classList.toggle('active');
+          this.textContent = body.classList.contains('open') ? 'Ocultar telemetría' : 'Ver telemetría';
+        }
+      }
+    }, 'Ver telemetría'),
+    el('div', { class: 'hx-telemetry-body', id: 'hx-telemetry-body' },
+      el('h4', { style: 'margin-bottom:var(--space-1);font-size:10px;' }, 'Runtime Telemetry'),
+      el('div', { id: 'hx-telemetry-panel' }),
+      el('h4', { style: 'margin:var(--space-2) 0 var(--space-1);font-size:10px;' }, 'Export Diagnostics'),
+      el('div', { id: 'hx-export-diag' })
+    )
+  );
+  sec.appendChild(telemetrySection);
+
+  // Update health badge + feed periodically
+  function updateDashRuntime() {
+    const ui = window.__HX_RUNTIME_UI__;
+    if (!ui) return;
+    const health = ui.computeHealth();
+    const badge = document.getElementById('hx-dash-op-badge');
+    if (badge) {
+      const status = health.status.toLowerCase();
+      badge.className = 'hx-op-badge ' + status;
+      badge.textContent = '● ' + health.status;
     }
-  })();
-  sec.appendChild(execStrip);
+    ui.buildActivityFeed();
+    ui.buildTelemetryPanel();
+    ui.buildExportDiagnostics();
 
-  const kpiGrid = el('div', { class: 'stats-cards' });
-  const makeCard = (title, value, icon) => el('div', { class: 'stat-card' }, el('div', { class: 'stat-icon' }, icon), el('div', { class: 'stat-value' }, String(value)), el('div', { class: 'stat-label' }, title));
-
-  (async () => {
-    try {
-      const emps = await Models.listEmployees();
-      const all = Array.isArray(emps) ? emps : Object.values(emps || {});
-      const totalEmps = all.length;
-      const avMap = await Models.getWeekAvailability();
-      const available = Object.values(avMap || {}).filter(x => x && x.disponible).length;
-      const stats = await Models.getSystemStats?.() || {};
-      kpiGrid.appendChild(makeCard('Convocatorias activas', stats.convocatorias_active ?? '—', createIcon('phone')));
-      kpiGrid.appendChild(makeCard('Empleados (total)', totalEmps, createIcon('user')));
-      kpiGrid.appendChild(makeCard('Empleados disponibles', available, createIcon('check')));
-      kpiGrid.appendChild(makeCard('Recuperos pendientes', stats.recuperos_pending ?? '—', createIcon('clock')));
-    } catch (e) {
-      kpiGrid.appendChild(makeCard('Error KPI', '—', createIcon('warn')));
-      console.error('Dashboard KPI load failed', e);
-    }
-  })();
-
-  sec.appendChild(kpiGrid);
-
-  // runtime inspector (reads window.__HX_RUNTIME__)
-  const rtCard = el('div', { class: 'card' }, el('h4', {}, 'Runtime Operational Health'), el('div', { id: 'runtime-inspector' }, 'Cargando estado runtime…'));
-  sec.appendChild(rtCard);
-
-  // Executive analytics panel (explainable, read-only)
-  const analyticsCard = el('div', { class: 'card' }, el('h4', {}, 'Executive Operational Summary'), el('div', { id: 'exec-analytics-root' }, 'Cargando analytics…'));
-  sec.appendChild(analyticsCard);
-
-  async function renderAnalytics() {
-    const root = $id('exec-analytics-root');
-    if (!root) return;
-    root.innerHTML = '';
-
-    // Prefer analytics exposed on runtime; fall back to local module if available
-    const rt = window.__HX_RUNTIME__ || {};
-    const analytics = rt.analytics || (window?.Analytics) || null;
-
-    // collect minimal snapshot from models/telemetry
-    let state = {};
-    try {
-      const exported = await Models.exportState?.() || {};
-      state.calls = Object.values(exported.callEvents || {});
-      state.employees = Object.values(exported.employees || {});
-    } catch (e) {
-      // best-effort: try to read from other model surfaces
-      try { state.calls = Object.values((await Models.listCalls?.()) || {}); } catch (_) { state.calls = []; }
-      try { state.employees = Array.isArray(await Models.listEmployees?.()) ? await Models.listEmployees() : Object.values(await Models.listEmployees?.() || {}); } catch (_) { state.employees = []; }
+    // V4: Update predictive alerts panel
+    const v4 = window.__HX_V4__;
+    if (v4) {
+      const panel = document.getElementById('v4-predictive-panel');
+      const countEl = document.getElementById('v4-pa-count');
+      if (panel) {
+        const alerts = v4.getPredictiveAlerts();
+        if (countEl) countEl.textContent = String(alerts.length);
+        panel.innerHTML = '';
+        if (!alerts.length) {
+          panel.appendChild(el('div', { class: 'v4-pa-empty' },
+            'No existen alertas críticas activas. El sistema opera normalmente.'
+          ));
+        } else {
+          alerts.slice(0, 10).forEach(a => {
+            const item = el('div', { class: 'v4-pa-item v4-pa-' + a.severity + ' v4-alert-appear' },
+              el('span', { class: 'v4-pa-category' }, a.category),
+              el('div', { class: 'v4-pa-body' },
+                el('div', { class: 'v4-pa-title' }, a.title),
+                el('div', { class: 'v4-pa-desc' }, a.description)
+              ),
+              el('button', { class: 'v4-pa-dismiss', onclick: (e) => { e.stopPropagation(); if (v4) v4.dismissPredictiveAlert(a.id); }, title: 'Descartar' }, '✕')
+            );
+            panel.appendChild(item);
+          });
+        }
+      }
     }
 
-    // telemetry / readiness
-    const telemetry = (api.meta && typeof api.meta.getTelemetry === 'function') ? api.meta.getTelemetry() : (rt.productionReadiness || rt.runtimeTelemetry || {});
-    state.telemetry = telemetry;
-
-    if (!analytics || typeof analytics.summarizeExecutiveDashboard !== 'function') {
-      root.appendChild(el('div', { class: 'muted' }, 'Analytics engine no disponible en este entorno.')); 
-      root.appendChild(el('div', { class: 'muted small' }, 'Verifica window.__HX_RUNTIME__.analytics')); 
-      return;
-    }
-
-    try {
-      const summary = analytics.summarizeExecutiveDashboard({ calls: state.calls, employees: state.employees, telemetry: telemetry });
-      // concise KPIs
-      const k = el('div', { class: 'exec-kpis' });
-      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Convocatorias'), el('div', { class: 'kpi-value' }, String(summary.totalCalls))));
-      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Aceptaciones'), el('div', { class: 'kpi-value' }, summary.acceptanceRate + '%')));
-      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Rechazos'), el('div', { class: 'kpi-value' }, summary.rejectionRate + '%')));
-      k.appendChild(el('div', { class: 'kpi' }, el('div', { class: 'kpi-label' }, 'Participación'), el('div', { class: 'kpi-value' }, summary.participationRate + '%')));
-      root.appendChild(k);
-
-      // small charts / trend text (last7Average)
-      const trend = el('div', { class: 'exec-trend' }, el('strong', {}, 'Tend. última semana: '), el('span', {}, String(summary.last7Average)));
-      root.appendChild(trend);
-
-      // readiness
-      if (summary.readinessScore != null) root.appendChild(el('div', { class: 'exec-readiness' }, el('strong', {}, 'Readiness: '), el('span', {}, String(summary.readinessScore))));
-
-      // export buttons
-      const btns = el('div', { class: 'exec-analytics-actions' });
-      btns.appendChild(el('button', { class: 'btn btn-secondary', onclick: () => { const txt = analytics.generateReport('weekly', summary, 'json'); const b = new Blob([txt], { type: 'application/json' }); downloadBlob(b, 'executive_summary.json'); } }, 'Exportar JSON'));
-      btns.appendChild(el('button', { class: 'btn btn-secondary', onclick: () => { const csv = analytics.generateReport('weekly', { rows: [ summary ] }, 'csv'); const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }); downloadBlob(b, 'executive_summary.csv'); } }, 'Exportar CSV'));
-      btns.appendChild(el('button', { class: 'btn btn-secondary', onclick: () => { const printable = '<pre>' + JSON.stringify(summary, null, 2) + '</pre>'; showModal('Executive Summary (print)', el('div', { html: printable }), [{ label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal }, { label: 'Imprimir', cls: 'btn btn-primary', action: () => { const w = window.open('', '_blank'); w.document.write('<html><head><title>Executive Summary</title></head><body>' + printable + '</body></html>'); w.print(); } }]); } }, 'Ver / Imprimir'));
-      root.appendChild(btns);
-
-    } catch (e) {
-      console.error('Analytics render failed', e);
-      root.appendChild(el('div', { class: 'text-danger' }, 'Error al generar analytics. Revisa consola.'));
+    // V5: Refresh strategic workspace periodically
+    const v5 = window.__HX_V5__;
+    if (v5) {
+      const root = document.getElementById('v5-workspace-root');
+      if (root && root.isConnected && health.status !== 'HEALTHY') {
+        // Only re-render on health changes to avoid flicker
+        // (the V5 module handles its own refresh interval)
+      }
     }
   }
 
-  function renderRuntime() {
-    const rt = window.__HX_RUNTIME__ || {};
-    const root = $id('runtime-inspector');
-    if (!root) return;
-    root.innerHTML = '';
-    const rows = [];
-    rows.push(el('div', {}, el('strong', {}, 'State: '), el('span', {}, rt.state || 'unknown')));
-    rows.push(el('div', {}, el('strong', {}, 'Último sync: '), el('span', {}, rt.lastSync || '—')));
-    rows.push(el('div', {}, el('strong', {}, 'Retries: '), el('span', {}, String(rt.retries || 0))));
-    rows.push(el('div', {}, el('strong', {}, 'Conflictos recientes: '), el('span', {}, String((rt.conflicts || []).length || 0))));
-    if (rt.degraded) rows.push(el('div', { class: 'text-danger' }, '⚠️ Degraded mode activo'));
-    rows.forEach(r => root.appendChild(r));
-  }
-  renderRuntime();
-  setInterval(()=>{ renderRuntime(); renderAnalytics(); }, 6000);
+  // Initial feed
+  setTimeout(updateDashRuntime, 100);
+  const dashInterval = setInterval(updateDashRuntime, 4000);
 
-  // initial analytics render
-  renderAnalytics();
+  // Store cleanup reference
+  sec._interval = dashInterval;
 
   return sec;
 }
@@ -669,7 +1048,10 @@ function buildTabSupervisor() {
             list.appendChild(node);
           });
         } else {
-          list.appendChild(el('div', { class: 'empty-state' }, 'No hay sugerencias disponibles.'));
+          list.appendChild(el('div', { class: 'hx-empty-state' },
+            el('p', { class: 'hx-empty-title' }, 'Sin sugerencias disponibles'),
+            el('p', { class: 'hx-empty-desc' }, 'Las sugerencias se generan automáticamente cuando hay empleados activos y datos de convocatorias.')
+          ));
         }
         sug.appendChild(list);
       }
@@ -688,10 +1070,9 @@ function buildTabSupervisor() {
       const tr = $id('supervisor-tools');
       if (tr) {
         const quick = el('div', { class: 'quick-tools' },
-          el('button', { class: 'btn btn-secondary', onclick: () => showModal('Runtime Health', el('pre', { class: 'mono' }, JSON.stringify(window.__HX_RUNTIME__ || {}, null, 2))) }, 'Runtime Health'),
-          el('button', { class: 'btn btn-secondary', onclick: async () => { const telemetry = api.meta.getTelemetry(); showModal('Retry & Conflict Diagnostics', el('pre', { class: 'mono' }, JSON.stringify(telemetry, null, 2))); } }, 'Retry Diagnostics'),
-          el('button', { class: 'btn btn-secondary', onclick: async () => { const health = api.meta.generateOperationalHealthSummary(); showModal('Operational Health', el('pre', { class: 'mono' }, JSON.stringify(health, null, 2))); } }, 'Conflict Diagnostics'),
-          el('button', { class: 'btn btn-primary', onclick: () => { const body = el('div', {}, el('input', { id: 'quick-emp-id', class: 'input-full', placeholder: 'ID o nombre empleado', 'aria-label': 'ID o nombre de empleado a buscar' })); showModal('Employee quick lookup', body, [ { label: 'Buscar', cls: 'btn btn-primary', action: async () => { const v = $id('quick-emp-id').value.trim(); try { const emp = await Models.getEmployee(v); if (!emp) { toast('Empleado no encontrado','warning'); return; } showModal('Empleado', el('pre',{class:'mono'}, JSON.stringify(emp, null, 2)), [{ label:'Cerrar', cls:'btn btn-secondary', action: closeModal }]); } catch(e){ toast('Lookup failed','error'); } } }, { label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal } ]); } }, 'Employee lookup')
+          el('button', { class: 'btn btn-secondary', onclick: () => { const rt = window.__HX_RUNTIME__ || {}; const health = window.__HX_RUNTIME_UI__?.computeHealth?.() || {}; showExecutiveModal('Health Operacional', el('div', {}, el('p', {}, 'Estado: ' + (rt.degraded ? 'Degradado' : 'Normal')), el('p', {}, 'Retries: ' + (rt.retries?.count || rt.retriesCount || 0)), el('p', {}, 'Conflictos: ' + (rt.conflicts?.length || rt.conflictsCount || 0)), el('p', {}, 'Avg latency: ' + (rt.avgLatencyMs || '—') + 'ms')), [{ label: 'Cerrar', cls: 'btn btn-primary', action: closeModal }], [{ label: 'Estado', value: rt.degraded ? 'Degradado' : 'Normal', color: rt.degraded ? 'var(--danger-fg)' : 'var(--success-fg)' }, { label: 'Retries', value: String(rt.retries?.count || rt.retriesCount || 0) }, { label: 'Conflictos', value: String(rt.conflicts?.length || rt.conflictsCount || 0) }, { label: 'Latencia', value: (rt.avgLatencyMs || '—') + 'ms' }]); } }, 'Health operacional'),
+          el('button', { class: 'btn btn-secondary', onclick: async () => { try { const health = api.meta.generateOperationalHealthSummary(); showModal('Resumen operacional', el('div', { class: 'detail-grid' }, el('div', {}, el('h4', {}, 'Issue detectados'), ...(health.detectedIssues || []).slice(0, 5).map(i => el('p', { class: 'muted small' }, '• ' + (i.type || i.msg || '—')))), el('div', {}, el('h4', {}, 'Readiness score'), el('span', { class: 'badge badge-success' }, String(health.readinessScore || health.telemetry?.READINESS_SCORE || '—') + '%')))); } catch(e) { toast('No disponible', 'warning'); } } }, 'Resumen operacional'),
+          el('button', { class: 'btn btn-primary', onclick: () => { const body = el('div', {}, el('input', { id: 'quick-emp-id', class: 'input-full', placeholder: 'ID o nombre empleado', 'aria-label': 'ID o nombre de empleado a buscar' })); showModal('Buscar empleado', body, [ { label: 'Buscar', cls: 'btn btn-primary', action: async () => { const v = $id('quick-emp-id').value.trim(); try { const emp = await Models.getEmployee(v); if (!emp) { toast('Empleado no encontrado','warning'); return; } showModal(safeText(emp.name), el('div', { class: 'detail-grid' }, el('div', {}, el('h4', {}, 'Datos'), infoRow('ID', emp.id), infoRow('Turno', emp.turno_base), infoRow('Tipo', emp.tipo)), el('div', {}, el('h4', {}, 'Stats'), infoRow('Reputación', String(emp.reputation || '—') + '/100'), infoRow('Horas 50%', String(emp.stats?.horas_50 || 0)), infoRow('Horas 100%', String(emp.stats?.horas_100 || 0)))), [{ label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal }]); } catch(e){ toast('Lookup failed','error'); } } }, { label: 'Cerrar', cls: 'btn btn-secondary', action: closeModal } ]); } }, 'Buscar empleado')
         );
         tr.appendChild(quick);
       }
@@ -753,9 +1134,10 @@ async function mountUI() {
           el('div', { class: 'brand-text' },
             el('span', { class: 'brand-name' }, 'Extras Celsur'),
             el('span', { class: 'brand-context' }, 'Op. Makro')
-          )
+          ),
+          el('span', { id: 'hx-runtime-dot', class: 'live-dot active', style: 'margin-left:6px;', title: 'Sistema activo' })
         ),
-        el('span', { id: 'runtime-badge', class: 'runtime-badge' },
+        el('span', { id: 'runtime-badge', class: 'runtime-badge hidden' },
           el('span', { class: 'pulse-dot' }),
           'running'
         )
@@ -794,13 +1176,13 @@ async function mountUI() {
           el('button', { class: 'header-icon-btn', onclick: () => switchTab('dashboard'), title: 'Dashboard' },
             createIcon('chart', 'Dashboard')
           ),
-          el('button', { id: 'debug-toggle-header', class: 'header-icon-btn', onclick: () => { try { window.__HX_TOGGLE_DEBUG_PANEL__?.(); } catch(e){} }, title: 'Debug Panel' },
+          el('button', { id: 'debug-toggle-header', class: 'header-icon-btn hidden', onclick: () => { try { window.__HX_TOGGLE_DEBUG_PANEL__?.(); } catch(e){} }, title: 'Debug Panel' },
             createIcon('gear', 'Debug')
           ),
           el('button', { class: 'header-icon-btn', onclick: () => { const b = new Blob([JSON.stringify({ exported: 'data' })], { type: 'application/json' }); downloadBlob(b, 'export.json'); }, title: 'Exportar datos' },
             createIcon('download', 'Exportar')
           ),
-          el('span', { id: 'app-version', class: 'version-text' }, 'v' + (APP_CONFIG.APP_VERSION || '—'))
+          el('span', { id: 'app-version', class: 'version-text hidden' }, 'v' + (APP_CONFIG.APP_VERSION || '—'))
         )
       )
     )
@@ -823,18 +1205,43 @@ async function mountUI() {
   const footer = el('footer', { class: 'app-footer' }, 'creado por M. Zequeira');
 
   const topContainer = el('div', { class: 'top-container' }, header);
+  const commandBar = buildExecCommandBar();
+  const bottomBar = buildBottomExecBar();
 
   appRoot.innerHTML = '';
   appRoot.appendChild(topContainer);
+  appRoot.appendChild(commandBar);
   appRoot.appendChild(alertBar);
   appRoot.appendChild(sections);
   appRoot.appendChild(footer);
   appRoot.appendChild(buildMobileBottomNav());
+  appRoot.appendChild(bottomBar);
+
+  // Mount Runtime UI — executive bar + health + telemetry
+  try {
+    const runtimeUI = window.__HX_RUNTIME_UI__;
+    if (runtimeUI && typeof runtimeUI.mount === 'function') {
+      const unmount = runtimeUI.mount();
+      runtimeUI.subscribeToRuntimeEvents();
+      // Seed initial activity
+      runtimeUI.pushActivity('SYSTEM', 'UI montada', 'INFO');
+      runtimeUI.pushActivity('STORAGE', 'Storage: ' + (APP_CONFIG.STORAGE_BACKEND || 'local'), 'INFO');
+    }
+  } catch (e) { console.warn('[runtime-ui] mount failed', e); }
 
   // Micro UX: initialize sticky header metrics and mobile mode handling
   try { initStickyHeader(); } catch (e) { console.warn('initStickyHeader failed', e); }
   try { initMobileMode(); } catch (e) { console.warn('initMobileMode failed', e); }
   try { initRuntimeBadgeUpdater(); } catch (e) { console.warn('initRuntimeBadgeUpdater failed', e); }
+
+  // Live presence and command palette keyboard shortcut
+  try { initLivePresence(); } catch (e) { console.warn('initLivePresence failed', e); }
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      openCommandPalette();
+    }
+  });
 
   switchTab('empleados');
   // Cleanup old empty night events before rendering UI
@@ -974,6 +1381,7 @@ function buildTabEmpleados() {
     ),
     explainNode('Lista de empleados y métricas clave. Activá el Modo explicación para ver notas contextuales en cada sección.'),
     toolbar,
+    el('div', { id: 'emp-context-bar', class: 'v5-tab-context' }),
     list
   );
   return sec;
@@ -982,7 +1390,7 @@ function buildTabEmpleados() {
 async function renderEmployees() {
   const cont = $id('employees-list');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-row"></div><div class="sk-row"></div><div class="sk-row"></div><div class="sk-row"></div><div class="sk-row"></div></div>';
 
   const allRaw = await Models.listEmployees();
   // Normalizar a array por si la fuente devuelve un objeto {id: emp, ...}
@@ -1004,13 +1412,13 @@ async function renderEmployees() {
   if (empTurnoFilter) filtered = filtered.filter(e => e.turno_base === empTurnoFilter);
 
   if (!filtered.length) {
-    cont.appendChild(el('div', { class: 'empty-state' },
-      el('div', { class: 'empty-state-icon' }, createIcon('user')),
-      el('p', { class: 'empty-state-title' }, q ? 'Sin resultados para "' + q + '"' : 'Todavía no hay empleados cargados'),
-      el('p', { class: 'empty-state-desc' }, q ? 'Probá con otro nombre o ID.' : 'Agregá empleados desde el botón "+ Agregar empleado" o importá un archivo CSV/XLS.'),
-      !q ? el('div', { class: 'toolbar', style: 'justify-content:center;margin-top:4px;' },
+    cont.appendChild(el('div', { class: 'hx-empty-state' },
+      el('div', { class: 'hx-empty-icon' }, createIcon('user')),
+      el('p', { class: 'hx-empty-title' }, q ? 'Sin resultados para "' + q + '"' : 'Todavía no hay empleados cargados'),
+      el('p', { class: 'hx-empty-desc' }, q ? 'Probá con otro nombre o ID.' : 'Agregá empleados con el botón "+ Agregar empleado" o importá un archivo CSV/XLS desde Config.'),
+      !q ? el('div', { class: 'hx-empty-actions' },
         el('button', { class: 'btn btn-primary btn-sm', onclick: openAddEmployeeModal }, '+ Agregar empleado'),
-        el('button', { class: 'btn btn-secondary btn-sm', onclick: openImportCsvModal }, 'Importar CSV/XLS')
+        el('button', { class: 'btn btn-secondary btn-sm', onclick: () => { switchTab('config'); } }, 'Ir a Config')
       ) : null
     ));
     return;
@@ -1121,8 +1529,8 @@ async function renderEmployees() {
       el('td', {}, diasBadge),
       el('td', { class: 'actions' },
         el('button', { class: 'btn btn-sm btn-info', onclick: () => showEmployeeDetailModal(e.id) }, 'Ver'),
-        el('button', { class: 'btn btn-sm btn-primary', onclick: () => openCallModal(e.id) }, '📞 Convocar'),
-        el('button', { class: 'btn btn-sm btn-warning', onclick: () => openSaturdayV12Modal(e.id) }, '📅 Sábado v1.2'),
+        el('button', { class: 'btn btn-sm btn-primary', onclick: () => openCallModal(e.id) }, createIcon('phone'), ' Convocar'),
+        el('button', { class: 'btn btn-sm btn-warning', onclick: () => openSaturdayV12Modal(e.id) }, createIcon('calendar'), ' Sábado'),
         el('button', { class: 'btn btn-sm btn-success', onclick: () => doRecordWeekdayExtra(e.id) }, '+Extra')
       )
     );
@@ -1327,7 +1735,7 @@ async function renderWeekPlanner() {
       await renderWeekPlanner();
       await renderEmployees();
     }
-  }, '💾 Guardar cambios');
+  }, createIcon('check'), ' Guardar cambios');
 
   const btnCancel = el('button', {
     class: 'btn btn-secondary btn-sm', onclick: () => {
@@ -1348,7 +1756,7 @@ async function renderWeekPlanner() {
   toolbar.appendChild(btnCancel);
 
   root.append(
-    el('h2', { class: 'section-title' }, '📋 Planificación Semanal'),
+    el('h2', { class: 'section-title with-icon' }, createIcon('calendar'), ' Planificación Semanal'),
     el('p', { class: 'section-desc' }, 'Marcá quién hace horas extras esta semana y en qué días se lo puede convocar. La selección es por semana y se limpia automáticamente.'),
     weekNav,
     el('div', { class: 'card mt-md' },
@@ -1510,13 +1918,25 @@ async function showEmployeeDetailModal(id) {
     buildIncidentsList(e)
   );
 
-  showModal('Detalle: ' + safeText(e.name), body, [
+  const summaryItems = featureOn('reputationSystem')
+    ? [
+        { label: 'Reputación', value: e.reputation + '/100', color: e.reputation >= 80 ? 'var(--success-fg)' : e.reputation >= 50 ? 'var(--warning-fg)' : 'var(--danger-fg)' },
+        { label: 'Horas 50%', value: stats.horas_50 },
+        { label: 'Horas 100%', value: stats.horas_100 },
+        { label: 'Convocatorias', value: stats.convocado },
+      ]
+    : [
+        { label: 'Horas 50%', value: stats.horas_50 },
+        { label: 'Horas 100%', value: stats.horas_100 },
+        { label: 'Convocatorias', value: stats.convocado },
+      ];
+  showExecutiveModal('Detalle: ' + safeText(e.name), body, [
     { label: 'Editar', cls: 'btn btn-secondary', action: () => openEditEmployeeModal(id) },
-    featureOn('transparencyMode') ? { label: 'Ver historial de impacto', cls: 'btn btn-secondary', action: () => openImpactHistoryModal(id) } : null,
-    featureOn('transparencyMode') && featureOn('rankings') ? { label: '¿Qué pasaría si?', cls: 'btn btn-info', action: () => openSimulatorModal(id) } : null,
-    { label: 'Reporte individual', cls: 'btn btn-info', action: () => generateEmployeePrintableReport(id) },
+    featureOn('transparencyMode') ? { label: 'Historial', cls: 'btn btn-secondary', action: () => openImpactHistoryModal(id) } : null,
+    featureOn('transparencyMode') && featureOn('rankings') ? { label: 'Simular', cls: 'btn btn-info', action: () => openSimulatorModal(id) } : null,
+    { label: 'Reporte', cls: 'btn btn-info', action: () => generateEmployeePrintableReport(id) },
     { label: 'Cerrar', cls: 'btn btn-primary', action: closeModal },
-  ].filter(Boolean));
+  ].filter(Boolean), summaryItems);
 }
 
 function buildIncidentsList(e) {
@@ -1939,10 +2359,11 @@ function buildTabConvocatorias() {
   );
 
   sec.append(
-    el('h2', { class: 'section-title' }, 'Convocatorias'),
+      el('h2', { class: 'section-title' }, 'Convocatorias'),
     el('p', { class: 'section-desc' }, 'Gestión de convocatorias — estados claros, timeline de intentos y acciones rápidas.'),
     toolbar,
-    el('div', { id: 'call-history-list' })
+    el('div', { id: 'call-context-bar', class: 'v5-tab-context' }),
+    el('div', { id: 'call-history-list', class: 'skeleton-area' })
   );
   renderCallHistory();
   return sec;
@@ -1999,15 +2420,15 @@ async function quickRepeatCall(callId) {
 async function renderCallHistory() {
   const cont = $id('call-history-list');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div></div>';
   const state = await Models.exportState();
   const calls = Object.values(state.callEvents || {});
   if (!calls.length) {
-    cont.appendChild(el('div', { class: 'empty-state' },
-      el('div', { class: 'empty-state-icon' }, createIcon('phone')),
-      el('p', { class: 'empty-state-title' }, 'Sin convocatorias registradas'),
-      el('p', { class: 'empty-state-desc' }, 'Las convocatorias aparecerán acá cuando se creen desde la vista de empleados o desde el botón "Convocar".'),
-      el('div', { class: 'toolbar', style: 'justify-content:center;margin-top:4px;' },
+    cont.appendChild(el('div', { class: 'hx-empty-state' },
+      el('div', { class: 'hx-empty-icon' }, createIcon('phone')),
+      el('p', { class: 'hx-empty-title' }, 'Sin convocatorias registradas'),
+      el('p', { class: 'hx-empty-desc' }, 'Las convocatorias aparecerán acá cuando se creen desde la vista de empleados.'),
+      el('div', { class: 'hx-empty-actions' },
         el('button', { class: 'btn btn-primary btn-sm', onclick: () => switchTab('empleados') }, 'Ir a empleados')
       )
     ));
@@ -2062,7 +2483,7 @@ async function renderCallHistory() {
         el('div', { class: 'call-actions' },
           !c.resultado_final ? el('button', { class: 'btn btn-sm btn-primary', onclick: () => openAttemptModal(c.id) }, 'Registrar intento') : el('span', { class: 'muted' }, 'Cerrada'),
           el('button', { class: 'btn btn-sm btn-secondary', onclick: () => quickRepeatCall(c.id) }, 'Convocar de nuevo'),
-          el('button', { class: 'btn btn-sm btn-info', onclick: () => { showModal('Detalles convocatoria', el('pre',{class:'muted'}, JSON.stringify(c,null,2))); } }, 'Ver raw')
+          ''
         )
       )
     );
@@ -2222,6 +2643,7 @@ function buildTabSabados() {
       )
     ),
     el('p', { class: 'section-desc' }, 'Intenciones → Asignaciones → Registro → Faltas/Recuperaciones.'),
+    el('div', { id: 'sat-context-bar', class: 'v5-tab-context' }),
     el('div', { class: 'card' },
       el('div', { class: 'flex-row gap-sm' },
         el('input', {
@@ -2688,7 +3110,7 @@ function openNightPrintable(dateKey) {
 async function renderSaturdayMgmtV12() {
   const cont = $id('sat-mgmt-panel');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div></div>';
   if (!satMgmtDate) return;
 
   // Modo móvil: flujo por pasos
@@ -3091,7 +3513,7 @@ async function openRegisterHoursV12(eventId) {
 async function renderRankingSabadoV12() {
   const cont = $id('saturday-ranking-list');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-table"><div class="sk-table-header"></div><div class="sk-table-row"></div><div class="sk-table-row"></div><div class="sk-table-row"></div></div></div>';
   if (!featureOn('saturdayRanking')) return;
   const rankings = await Models.obtenerRankingSabado();
 
@@ -3144,9 +3566,9 @@ function buildTabEstadisticas() {
     el('h2', { class: 'section-title' }, featureOn('rankings') ? 'Estadísticas & Ranking' : 'Estadísticas'),
     explainNode('Resumen de métricas y ranking. El botón "¿Cómo se calcula el ranking?" muestra la lógica técnica.'),
     el('div', { class: 'toolbar' },
-      el('button', { class: 'btn btn-primary', onclick: renderStats }, '🔄 Actualizar'),
-      featureOn('rankings') ? el('button', { class: 'btn btn-secondary', onclick: doExportSuggestionsCsv }, '⬇ Exportar Excel ranking') : null,
-      featureOn('rankings') && featureOn('transparencyMode') ? el('button', { class: 'btn btn-info', onclick: openRankingExplainModal }, '¿Cómo se calcula el ranking?') : null
+      el('button', { class: 'btn btn-primary', onclick: renderStats }, createIcon('reload'), ' Actualizar'),
+      featureOn('rankings') ? el('button', { class: 'btn btn-secondary', onclick: doExportSuggestionsCsv }, createIcon('download'), ' Exportar Excel ranking') : null,
+      featureOn('rankings') && featureOn('transparencyMode') ?       el('button', { class: 'btn btn-info', onclick: openRankingExplainModal }, createIcon('info'), ' ¿Cómo se calcula el ranking?') : null
     ),
     el('div', { id: 'stats-summary', class: 'stats-cards' }),
     featureOn('advancedStats') ? el('div', { id: 'ns-exec-root', class: 'ns-exec-root' }) : null,
@@ -3174,16 +3596,16 @@ function renderStats() {
 async function renderNightShiftExecutive() {
   const root = $id('ns-exec-root');
   if (!root) return;
-  root.innerHTML = '';
+  root.innerHTML = '<div class="sk-grid"><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div></div>';
   if (!featureOn('advancedStats')) return;
   // Header with month selector
   const ymInput = el('input', { id: 'ns-month-select', type: 'month', class: 'input-sm', 'aria-label': 'Seleccionar mes para análisis ejecutivo' });
   // default to current month
   ymInput.value = new Date().toISOString().slice(0,7);
   const header = el('div', { class: 'ns-exec-header' },
-    el('h3', { class: 'section-subtitle' }, '📊 Turno Noche — Análisis Ejecutivo'),
+    el('h3', { class: 'section-subtitle with-icon' }, createIcon('moon'), ' Turno Noche — Análisis Ejecutivo'),
     el('div', { class: 'ns-exec-controls' }, el('label', { class: 'muted' }, 'Mes:'), ymInput,
-      el('button', { class: 'btn btn-sm btn-primary', onclick: () => renderNightShiftExecutive() }, 'Actualizar')
+      el('button', { class: 'btn btn-sm btn-primary', onclick: () => renderNightShiftExecutive() }, createIcon('reload'), ' Actualizar')
     )
   );
   root.appendChild(header);
@@ -3213,10 +3635,10 @@ async function renderNightShiftExecutive() {
     // Alerts / badges
     const alerts = el('div', { class: 'ns-exec-alerts' });
     if ((stats.costo_total_mes || 0) > 0 && (stats.total_eventos || 0) > 4) {
-      alerts.appendChild(el('span', { class: 'badge badge-warning' }, '⚠️ Frecuencia alta'));
+      alerts.appendChild(el('span', { class: 'badge badge-warning' }, createIcon('warn'), ' Frecuencia alta'));
     }
     if ((stats.indice_saturacion || 0) > 1.5) {
-      alerts.appendChild(el('span', { class: 'badge badge-danger' }, '🛑 Alta saturación operativa'));
+      alerts.appendChild(el('span', { class: 'badge badge-danger' }, createIcon('warn'), ' Alta saturación operativa'));
     }
 
     root.appendChild(cards);
@@ -3230,7 +3652,7 @@ async function renderNightShiftExecutive() {
 async function renderSummaryCards() {
   const cont = $id('stats-summary');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-grid"><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div><div class="sk-stat-card"></div></div>';
   const all = await Models.listEmployees();
   const active = all.filter(e => e.activo);
   const total50 = active.reduce((s, e) => s + e.stats.horas_50, 0);
@@ -3265,15 +3687,15 @@ async function renderSummaryCards() {
 async function renderRankingTable() {
   const cont = $id('stats-ranking');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-table"><div class="sk-table-header"></div><div class="sk-table-row"></div><div class="sk-table-row"></div><div class="sk-table-row"></div><div class="sk-table-row"></div><div class="sk-table-row"></div></div></div>';
   if (!featureOn('rankings')) return;
   if (isMobileMode()) { await renderRankingCards(); return; }
   const list = await Models.suggestionList();
   if (!list.length) {
-    cont.appendChild(el('div', { class: 'empty-state' },
-      el('div', { class: 'empty-state-icon' }, createIcon('user')),
-      el('p', { class: 'empty-state-title' }, 'Sin empleados activos'),
-      el('p', { class: 'empty-state-desc' }, 'No hay empleados activos para generar el ranking. Activá empleados desde la vista de empleados o cargá nuevos.')
+    cont.appendChild(el('div', { class: 'hx-empty-state' },
+      el('div', { class: 'hx-empty-icon' }, createIcon('user')),
+      el('p', { class: 'hx-empty-title' }, 'Sin empleados activos'),
+      el('p', { class: 'hx-empty-desc' }, 'No hay empleados activos para generar el ranking. Activá empleados desde la vista de empleados o cargá nuevos.')
     ));
     return;
   }
@@ -3316,10 +3738,10 @@ async function renderRankingCards() {
   if (!featureOn('rankings')) return;
   const list = await Models.suggestionList();
   if (!list.length) {
-    cont.appendChild(el('div', { class: 'empty-state' },
-      el('div', { class: 'empty-state-icon' }, createIcon('user')),
-      el('p', { class: 'empty-state-title' }, 'Sin empleados activos'),
-      el('p', { class: 'empty-state-desc' }, 'Activá empleados desde la vista de empleados o cargá nuevos.')
+    cont.appendChild(el('div', { class: 'hx-empty-state' },
+      el('div', { class: 'hx-empty-icon' }, createIcon('user')),
+      el('p', { class: 'hx-empty-title' }, 'Sin empleados activos'),
+      el('p', { class: 'hx-empty-desc' }, 'Activá empleados desde la vista de empleados o cargá nuevos.')
     ));
     return;
   }
@@ -3327,7 +3749,7 @@ async function renderRankingCards() {
   const cards = el('div', { class: 'ranking-cards' });
   list.forEach((e, idx) => {
     const m = e.__meta;
-    const rankStr = idx < 3 ? ['🥇', '🥈', '🥉'][idx] : String(idx + 1);
+    const rankStr = idx < 3 ? ['#1', '#2', '#3'][idx] : String(idx + 1);
     cards.appendChild(el('div', { class: 'ranking-card' },
       el('div', { class: 'ranking-card-header' },
         el('span', { class: 'ranking-card-rank' }, rankStr),
@@ -3358,9 +3780,9 @@ async function renderRankingCards() {
           : null
       ),
       el('div', { class: 'ranking-card-actions' },
-        el('button', { class: 'btn btn-sm btn-info',    onclick: () => openCallModal(e.id) }, '📞 Intento'),
-        el('button', { class: 'btn btn-sm btn-success', onclick: () => openAssignModal(e.id, topIds) }, '✔ Confirmar'),
-        el('button', { class: 'btn btn-sm btn-danger',  onclick: () => openCallModal(e.id) }, '❌ Falta')
+        el('button', { class: 'btn btn-sm btn-info',    onclick: () => openCallModal(e.id) }, createIcon('phone'), ' Intento'),
+        el('button', { class: 'btn btn-sm btn-success', onclick: () => openAssignModal(e.id, topIds) }, createIcon('check'), ' Confirmar'),
+        el('button', { class: 'btn btn-sm btn-danger',  onclick: () => openCallModal(e.id) }, createIcon('cross'), ' Falta')
       )
     ));
   });
@@ -3370,7 +3792,7 @@ async function renderRankingCards() {
 async function renderTopOffenders() {
   const cont = $id('stats-offenders');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-table"><div class="sk-table-header"></div><div class="sk-table-row"></div><div class="sk-table-row"></div></div></div>';
   if (!featureOn('advancedStats') || !featureOn('penalties')) return;
   const all = await Models.listEmployees();
   const sorted = all
@@ -3380,7 +3802,11 @@ async function renderTopOffenders() {
     .slice(0, 10);
 
   if (!sorted.length) {
-    cont.appendChild(el('p', { class: 'muted' }, 'Sin incumplimientos registrados.'));
+    cont.innerHTML = '';
+    cont.appendChild(el('div', { class: 'hx-empty-state' },
+      el('p', { class: 'hx-empty-title' }, 'Sin incumplimientos'),
+      el('p', { class: 'hx-empty-desc' }, 'Todos los empleados cumplen con los indicadores operacionales.')
+    ));
     return;
   }
 
@@ -3409,11 +3835,15 @@ async function renderTopOffenders() {
 async function renderAuditLogs() {
   const cont = $id('stats-auditlog');
   if (!cont) return;
-  cont.innerHTML = '';
+  cont.innerHTML = '<div class="sk-container"><div class="sk-table"><div class="sk-table-header"></div><div class="sk-table-row"></div><div class="sk-table-row"></div></div></div>';
   if (!featureOn('advancedStats') || !featureOn('rankings')) return;
   const logs = await Models.getAuditLogs();
   if (!logs.length) {
-    cont.appendChild(el('p', { class: 'muted' }, 'Sin registros de auditoría.'));
+    cont.innerHTML = '';
+    cont.appendChild(el('div', { class: 'hx-empty-state' },
+      el('p', { class: 'hx-empty-title' }, 'Sin registros de auditoría'),
+      el('p', { class: 'hx-empty-desc' }, 'Todas las asignaciones se realizaron dentro del top sugerido.')
+    ));
     return;
   }
   const tbl = el('table', { class: 'data-table' });
@@ -3555,12 +3985,12 @@ function buildDataPanel() {
 
       el('div', { class: 'config-action-group' },
         el('h4', {}, 'Exportar'),
-        el('button', { class: 'btn btn-secondary', onclick: doExportJson }, '⬇ Exportar todo (JSON)'),
-        el('button', { class: 'btn btn-secondary', onclick: doExportEmployeesCsv }, '⬇ Empleados (CSV)'),
-        el('button', { class: 'btn btn-success', onclick: doExportEmployeesXls }, '⬇ Empleados (XLS)'),
-        el('button', { class: 'btn btn-secondary', onclick: doExportFilteredEvents }, '⬇ Exportar eventos (filtro fechas)'),
-        el('button', { class: 'btn btn-secondary', onclick: openPrintableReport }, '🖨 Vista imprimible (PDF)'),
-        el('button', { class: 'btn btn-success', onclick: () => exportReportXls() }, '⬇ Informe XLS'),
+        el('button', { class: 'btn btn-secondary', onclick: doExportJson }, createIcon('download'), ' Exportar todo (JSON)'),
+        el('button', { class: 'btn btn-secondary', onclick: doExportEmployeesCsv }, createIcon('download'), ' Empleados (CSV)'),
+        el('button', { class: 'btn btn-success', onclick: doExportEmployeesXls }, createIcon('download'), ' Empleados (XLS)'),
+        el('button', { class: 'btn btn-secondary', onclick: doExportFilteredEvents }, createIcon('download'), ' Exportar eventos (filtro fechas)'),
+        el('button', { class: 'btn btn-secondary', onclick: openPrintableReport }, createIcon('download'), ' Vista imprimible (PDF)'),
+        el('button', { class: 'btn btn-success', onclick: () => exportReportXls() }, createIcon('download'), ' Informe XLS'),
       ),
 
       el('div', { class: 'config-action-group' },
@@ -3571,8 +4001,8 @@ function buildDataPanel() {
       ),
 
       el('div', { class: 'config-action-group danger-zone' },
-        el('h4', { class: 'text-danger' }, '⚠️ Zona de peligro'),
-        el('button', { class: 'btn btn-danger', onclick: doResetData }, '🗑 Borrar todos los datos locales')
+        el('h4', { class: 'text-danger' }, createIcon('warn'), ' Zona de peligro'),
+        el('button', { class: 'btn btn-danger', onclick: doResetData }, createIcon('trash'), ' Borrar todos los datos locales')
       )
       ,
       el('div', { class: 'config-action-group' },
@@ -3857,7 +4287,7 @@ function openPrintableReport() {
   );
   showModal('Generar reporte imprimible', body, [
     { label: 'Cancelar', cls: 'btn btn-secondary', action: closeModal },
-    { label: '🖨 Abrir reporte', cls: 'btn btn-primary', action: generatePrintableReport },
+    { label: 'Abrir reporte', cls: 'btn btn-primary', action: generatePrintableReport },
   ]);
 }
 
@@ -4174,6 +4604,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { toast('MODO MOVIL OPTIMIZADO REAL', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
   // Branding confirmation (discrete)
   try { toast('IDENTIDAD VISUAL CELSUR APLICADA', 'success', 2200); } catch (e) { console.error("UI Error:", e); }
+
+  // Lucide Icons init
+  if (typeof lucide !== 'undefined') {
+    try { lucide.createIcons(); } catch (e) { /* non-critical */ }
+  }
 
   // Final controlled init message (will only appear when DEBUG_MODE=true)
   debugLog('SISTEMA INICIALIZADO EN MODO PRODUCCIÓN');
