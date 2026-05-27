@@ -197,6 +197,7 @@ function initExplainMode() {
 
 // ─── Sticky header initializer ──────────────────────────────────────────────
 function initStickyHeader() {
+  if (uiRuntimeGuards.stickyHeaderBound) return;
   const topEl = document.querySelector('.top-container');
   const sectionsEl = document.querySelector('.tab-sections');
   if (!topEl || !sectionsEl) return;
@@ -214,13 +215,15 @@ function initStickyHeader() {
       sectionsEl.classList.remove('sections-offset-compact');
     }
   };
+  const throttledComputeOffset = throttle(computeOffset, 120);
   computeOffset();
-  window.addEventListener('resize', computeOffset);
+  window.addEventListener('resize', throttledComputeOffset, { passive: true });
 
   // shadow toggling on scroll for the whole top container
   const onScroll = () => topEl.classList.toggle('scrolled', window.scrollY > 10);
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
+  uiRuntimeGuards.stickyHeaderBound = true;
 }
 
 // ─── Toast notifications (reemplaza alert()) ─────────────────────────────────
@@ -514,8 +517,10 @@ function getRelativeTime(ts) {
 // ─── LIVE SYSTEM PRESENCE UPDATER ─────────────────────────────────────────
 
 function initLivePresence() {
+  if (uiRuntimeGuards.livePresenceStarted) return;
   setInterval(updateLiveIndicators, 4000);
   updateLiveIndicators();
+  uiRuntimeGuards.livePresenceStarted = true;
 }
 
 function updateLiveIndicators() {
@@ -675,12 +680,30 @@ let mobileMode = false;
 let mobileSatStep = 1;
 const MOBILE_SAT_STEPS = ['Revisión', 'Confirmación', 'Asignación', 'Registro horas', 'Cierre'];
 
+const uiRuntimeGuards = { stickyHeaderBound:false, mobileResizeBound:false, dynamicVisualsResizeBound:false, livePresenceStarted:false, runtimeBadgeStarted:false };
+
+function throttle(fn, wait = 120) {
+  let last = 0; let timer = null;
+  return (...args) => {
+    const now = Date.now();
+    const remaining = wait - (now - last);
+    if (remaining <= 0) {
+      if (timer) { clearTimeout(timer); timer = null; }
+      last = now;
+      fn(...args);
+    } else if (!timer) {
+      timer = setTimeout(() => { last = Date.now(); timer = null; fn(...args); }, remaining);
+    }
+  };
+}
+
 // ─── Modo Móvil — funciones ──────────────────────────────────────────────────
 
 function isMobileMode() { return mobileMode; }
 
 function setMobileMode(val) {
-  mobileMode = val;
+  if (mobileMode === !!val) return;
+  mobileMode = !!val;
   document.body.classList.toggle('mobile-mode', val);
   document.body.classList.toggle('desktop-mode', !val);
   localStorage.setItem('uiPreference', val ? 'mobile' : 'desktop');
@@ -712,14 +735,16 @@ function initMobileMode() {
     useMobile = window.innerWidth < 768;
   }
   setMobileMode(useMobile);
+  if (uiRuntimeGuards.mobileResizeBound) return;
   // Detectar cambios de tamaño: en pantallas pequeñas siempre forzar mobile
-  window.addEventListener('resize', () => {
+  window.addEventListener('resize', throttle(() => {
     if (window.innerWidth <= 640) {
       setMobileMode(true);
     } else if (!localStorage.getItem('uiPreference')) {
       setMobileMode(window.innerWidth < 768);
     }
-  });
+  }, 160), { passive: true });
+  uiRuntimeGuards.mobileResizeBound = true;
 }
 
 function applyDynamicVisuals() {
@@ -735,7 +760,12 @@ function applyDynamicVisuals() {
 
 // ensure dynamic visuals are applied after load and on resize
 try { document.addEventListener('DOMContentLoaded', applyDynamicVisuals); } catch (e) {}
-try { window.addEventListener('resize', applyDynamicVisuals); } catch (e) {}
+try {
+  if (!uiRuntimeGuards.dynamicVisualsResizeBound) {
+    window.addEventListener('resize', throttle(applyDynamicVisuals, 150), { passive: true });
+    uiRuntimeGuards.dynamicVisualsResizeBound = true;
+  }
+} catch (e) {}
 
 function buildMobileBottomNav() {
   const MOB_TABS = [
@@ -1285,8 +1315,10 @@ async function mountUI() {
 
 
 function initRuntimeBadgeUpdater() {
+  if (uiRuntimeGuards.runtimeBadgeStarted) return;
   updateRuntimeBadge();
   setInterval(updateRuntimeBadge, 4000);
+  uiRuntimeGuards.runtimeBadgeStarted = true;
 }
 
 async function refreshShiftIndicator() {
@@ -1388,6 +1420,7 @@ function buildTabEmpleados() {
 }
 
 async function renderEmployees() {
+  console.time('renderEmployees');
   const cont = $id('employees-list');
   if (!cont) return;
   cont.innerHTML = '<div class="sk-container"><div class="sk-row"></div><div class="sk-row"></div><div class="sk-row"></div><div class="sk-row"></div><div class="sk-row"></div></div>';
@@ -3584,6 +3617,7 @@ function buildTabEstadisticas() {
 }
 
 function renderStats() {
+  console.time('renderStats');
   renderSummaryCards();
   if (featureOn('rankings')) renderRankingTable();
   if (featureOn('advancedStats')) {
@@ -4591,11 +4625,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const namesStr = names.join(', ');
       startupAlerts.push({ type: 'danger', msg: `⚠️ ${deactivated.length} empleado(s) desactivado(s) por fin de contrato: ${namesStr}. Verificá en la pestaña Empleados.` });
     }
+    console.time('bootstrapApp');
     await mountUI();
-    initMobileMode();  // inicializar modo antes del resto para que la clase esté activa
+    console.timeEnd('bootstrapApp');
     renderAlertBar();
-    // initialize sticky header behavior after UI mounted
-    try { initStickyHeader(); console.log('HEADER STICKY ACTIVADO'); } catch (e) { console.error("UI Error:", e); }
     debugLog("FASE 3B HARDENING COMPLETADA");
 
     // Mensajes solicitados (tienen visibilidad operativa reducida como toasts)
