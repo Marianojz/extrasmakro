@@ -1,3 +1,29 @@
-```javascript
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.pyc
+__pycache__/
 
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Build directories
+dist/
+build/
+target/
 ```

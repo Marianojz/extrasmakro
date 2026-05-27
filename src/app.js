@@ -60,6 +60,7 @@ import './strategic-operations-v5.js';
 import { normalizeId } from './utils_id.js';
 import { initAuth, loginWithEmail, logout, getAuthDiagnostics, getCurrentUser } from './auth.js';
 import { hasRole, canAccess, canExecuteOperation } from './permissions.js';
+import './anti-freeze-metrics.js';  // FASE 1: Instrumentación forense anti-freeze
 
 // Initialize backend through the API boundary
 if (APP_CONFIG.STORAGE_BACKEND === 'supabase') {
