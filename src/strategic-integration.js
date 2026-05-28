@@ -1,6 +1,10 @@
 (function(){
   if (typeof document === 'undefined') return;
-  document.addEventListener('DOMContentLoaded', () => {
+  let _strategicMounted = false;
+
+  function mountStrategicIntegration() {
+    if (_strategicMounted) return;
+    _strategicMounted = true;
     setTimeout(() => {
       try {
         const nav = document.querySelector('.nav-tabs');
@@ -54,5 +58,15 @@
         attachV5();
       } catch (e) { console.error('strategic-integration failed', e); }
     }, 800);
-  });
+  }
+
+  window.__HX_STRATEGIC_INTEGRATION__ = {
+    mount: mountStrategicIntegration,
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mountStrategicIntegration);
+  } else {
+    mountStrategicIntegration();
+  }
 })();

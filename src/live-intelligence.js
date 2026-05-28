@@ -1,6 +1,9 @@
 (function(){
   if (typeof window === 'undefined') return;
 
+  let _liveMounted = false;
+  let _liveTimers = [];
+
   function getRt() { return window.__HX_RUNTIME__ || {}; }
   function getUi() { return window.__HX_RUNTIME_UI__ || {}; }
   function getTelemetry() {
@@ -213,8 +216,10 @@
   }
 
   function mountLiveIntelligence() {
+    if (_liveMounted) return;
     const dashboard = document.getElementById('tab-dashboard');
     if (!dashboard) return;
+    _liveMounted = true;
     const insertPoints = dashboard.querySelectorAll('[data-li-mount]');
     if (!insertPoints.length) {
       const compact = document.getElementById('hx-dash-compact');
@@ -245,18 +250,29 @@
     refreshIntelPanel();
     refreshRuntimeMetrics();
     refreshAlertCenter();
-    setInterval(refreshIntelPanel, 12000);
-    setInterval(refreshRuntimeMetrics, 8000);
-    setInterval(refreshAlertCenter, 6000);
+    _liveTimers.push(setInterval(refreshIntelPanel, 12000));
+    _liveTimers.push(setInterval(refreshRuntimeMetrics, 8000));
+    _liveTimers.push(setInterval(refreshAlertCenter, 6000));
+  }
+
+  function unmountLiveIntelligence() {
+    _liveTimers.forEach(id => clearInterval(id));
+    _liveTimers = [];
+    _liveMounted = false;
   }
 
   const LiveIntelligence = {
     mount: mountLiveIntelligence,
+    unmount: unmountLiveIntelligence,
     refreshIntel: refreshIntelPanel,
     refreshRuntime: refreshRuntimeMetrics,
     refreshAlerts: refreshAlertCenter,
   };
 
   window.__HX_LIVE_INTELLIGENCE__ = LiveIntelligence;
-  try { document.addEventListener('DOMContentLoaded', () => { setTimeout(mountLiveIntelligence, 1500); }); } catch(e) {}
+  try {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => { setTimeout(mountLiveIntelligence, 1500); });
+    }
+  } catch(e) {}
 })();

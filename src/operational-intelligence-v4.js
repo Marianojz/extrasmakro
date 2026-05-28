@@ -2,6 +2,9 @@
   if (typeof window === 'undefined') return;
 
   const V4 = {};
+  let _v4Mounted = false;
+  let _v4UpdateInterval = null;
+  let _v4ScanInterval = null;
 
   function getRt() { return window.__HX_RUNTIME__ || {}; }
   function getUi() { return window.__HX_RUNTIME_UI__ || {}; }
@@ -785,8 +788,10 @@
   // ─────────────────────────────────────────────────────────────────────────
 
   function mountV4() {
+    if (_v4Mounted) return;
     const app = document.getElementById('app');
     if (!app) return;
+    _v4Mounted = true;
 
     // Inject executive summary after runtime bar
     const runtimeBar = document.getElementById('hx-runtime-bar');
@@ -833,7 +838,7 @@
 
     // Update loops
     let v4Tick = 0;
-    setInterval(() => {
+    _v4UpdateInterval = setInterval(() => {
       v4Tick++;
       updateExecutiveSummary();
       updateMobileExecutiveStrip();
@@ -843,7 +848,7 @@
       }
     }, 8000);
 
-    setInterval(() => {
+    _v4ScanInterval = setInterval(() => {
       scanPredictiveAlerts();
       scanContextualActions();
       const caPanel = document.getElementById('v4-contextual-actions');
@@ -858,6 +863,18 @@
     updateMobileExecutiveStrip();
     updateSystemPresence();
     setTimeout(() => buildOperationalTimeline(), 500);
+  }
+
+  function unmountV4() {
+    if (_v4UpdateInterval) {
+      clearInterval(_v4UpdateInterval);
+      _v4UpdateInterval = null;
+    }
+    if (_v4ScanInterval) {
+      clearInterval(_v4ScanInterval);
+      _v4ScanInterval = null;
+    }
+    _v4Mounted = false;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -885,13 +902,16 @@
   V4.applyMicroInteractions = applyMicroInteractions;
   V4.detectRenderRedundancy = detectRenderRedundancy;
   V4.mount = mountV4;
+  V4.unmount = unmountV4;
   V4.updateExecutiveSummary = updateExecutiveSummary;
 
   window.__HX_V4__ = V4;
 
   try {
-    document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(mountV4, 2000);
-    });
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(mountV4, 2000);
+      });
+    }
   } catch(e) {}
 })();

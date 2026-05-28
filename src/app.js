@@ -14,6 +14,7 @@
 import api from './api/apiLayer.js';
 import { APP_CONFIG, NIGHT_SHIFT_CONFIG, NIGHT_SHIFT_STRUCTURE, NIGHT_SHIFT_ORDER, EMPLOYEE_PUESTOS, SUPERVISORES, EXTRA_TIPOS } from './config.js';
 import { isFeatureEnabled } from './config/features.js';
+import './bootstrap-forensics.js';
 // [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
 // import './runtime.js';  <-- REACTIVADO para testing FASE 2.1
 import './runtime.js';
@@ -28,15 +29,6 @@ import './debug-panel.js';
 import runtimeDiagnostics from './runtimeDiagnostics.js';
 import './storage/cleanup-lite.js';
 import supervisor from './supervisor.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './live-intelligence.js';  <-- REACTIVADO para testing FASE 2.4
-import './live-intelligence.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './operational-intelligence-v4.js';  <-- REACTIVADO para testing FASE 2.5
-import './operational-intelligence-v4.js';
-// [AUDIT CRÍTICO] Módulo aislado temporalmente - potencial causa de freeze
-// import './strategic-operations-v5.js';  <-- REACTIVADO para testing FASE 2.6
-import './strategic-operations-v5.js';
 
 // [AUDIT CRÍTICO] startupEnvironmentValidation COMENTADO - posible fuente de loops/observers
 /*
@@ -4576,11 +4568,85 @@ function doApplyMonthlyRecovery() {
   );
 }
 
+function waitMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function paintBootShell() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  if (app.dataset.bootShell === '1') return;
+  app.dataset.bootShell = '1';
+  app.innerHTML = '<div class="card" style="margin:20px;max-width:560px"><h3>Iniciando sistema</h3><p class="muted">Cargando núcleo operativo y verificaciones de integridad.</p></div>';
+}
+
+async function runDeferredBootModules() {
+  if (window.__HX_DEFERRED_BOOT_DONE__) return;
+  window.__HX_DEFERRED_BOOT_DONE__ = true;
+  window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {};
+  window.__HX_RUNTIME__.bootPhases = window.__HX_RUNTIME__.bootPhases || [];
+
+  const runPhase = async (name, loader) => {
+    const startedAt = Date.now();
+    try {
+      await loader();
+      window.__HX_RUNTIME__.bootPhases.push({ name, status: 'ok', durationMs: Date.now() - startedAt, ts: Date.now() });
+    } catch (error) {
+      window.__HX_RUNTIME__.bootPhases.push({ name, status: 'error', durationMs: Date.now() - startedAt, ts: Date.now(), error: String(error && error.message) });
+      console.error('[boot][phase-failed]', name, error);
+    }
+  };
+
+  await runPhase('operational-v4', async () => {
+    await import('./operational-intelligence-v4.js');
+    if (window.__HX_V4__ && typeof window.__HX_V4__.mount === 'function') {
+      window.__HX_V4__.mount();
+    }
+  });
+
+  await waitMs(120);
+
+  await runPhase('live-intelligence', async () => {
+    await import('./live-intelligence.js');
+    if (window.__HX_LIVE_INTELLIGENCE__ && typeof window.__HX_LIVE_INTELLIGENCE__.mount === 'function') {
+      window.__HX_LIVE_INTELLIGENCE__.mount();
+    }
+  });
+
+  await waitMs(120);
+
+  await runPhase('strategic-v5', async () => {
+    await import('./strategic-operations-v5.js');
+    if (window.__HX_V5__ && typeof window.__HX_V5__.mount === 'function') {
+      window.__HX_V5__.mount();
+    }
+  });
+
+  await waitMs(120);
+
+  await runPhase('strategic-integration', async () => {
+    await import('./strategic-integration.js');
+    if (window.__HX_STRATEGIC_INTEGRATION__ && typeof window.__HX_STRATEGIC_INTEGRATION__.mount === 'function') {
+      window.__HX_STRATEGIC_INTEGRATION__.mount();
+    }
+  });
+
+  await runPhase('boot-forensics-snapshot', async () => {
+    if (window.__HX_BOOT_FORENSICS__ && typeof window.__HX_BOOT_FORENSICS__.snapshot === 'function') {
+      window.__HX_RUNTIME__.bootForensics = window.__HX_BOOT_FORENSICS__.snapshot();
+    }
+  });
+}
+
 // --- Inicializacion ----------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', async () => {
+  paintBootShell();
   try {
-    // Firebase connection check
+    // Montar UI primero para evitar pantalla negra/blanca durante tareas de mantenimiento.
+    await mountUI();
+
+    // Firebase connection check (deferred, non-blocking for first paint)
     if (APP_CONFIG.FIREBASE_ENABLED) {
       try {
         await Models.system.verifyStorageConnection();
@@ -4606,11 +4672,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const namesStr = names.join(', ');
       startupAlerts.push({ type: 'danger', msg: `⚠️ ${deactivated.length} empleado(s) desactivado(s) por fin de contrato: ${namesStr}. Verificá en la pestaña Empleados.` });
     }
-    await mountUI();
-    initMobileMode();  // inicializar modo antes del resto para que la clase esté activa
+
     renderAlertBar();
-    // initialize sticky header behavior after UI mounted
-    try { initStickyHeader(); console.log('HEADER STICKY ACTIVADO'); } catch (e) { console.error("UI Error:", e); }
+    await runDeferredBootModules();
+
     debugLog("FASE 3B HARDENING COMPLETADA");
 
     // Mensajes solicitados (tienen visibilidad operativa reducida como toasts)

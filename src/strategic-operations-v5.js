@@ -2,6 +2,8 @@
   if (typeof window === 'undefined') return;
 
   const V5 = {};
+  let _v5Mounted = false;
+  let _v5BeforeUnloadBound = false;
 
   function getRt() { return window.__HX_RUNTIME__ || {}; }
   function getUi() { return window.__HX_RUNTIME_UI__ || {}; }
@@ -743,8 +745,10 @@
   }
 
   function mountV5() {
+    if (_v5Mounted) return;
     const app = document.getElementById('app');
     if (!app) return;
+    _v5Mounted = true;
 
     // Inject mobile executive strip V2
     if (document.querySelector('.mobile-bottom-nav') && !document.getElementById('v5-mobile-exec')) {
@@ -765,7 +769,10 @@
   }
 
   // Store reference for cleanup
-  window.addEventListener('beforeunload', stopRefresh);
+  if (!_v5BeforeUnloadBound) {
+    window.addEventListener('beforeunload', stopRefresh);
+    _v5BeforeUnloadBound = true;
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // PUBLIC API
@@ -794,8 +801,10 @@
   window.__HX_V5__ = V5;
 
   try {
-    document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(mountV5, 2500);
-    });
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(mountV5, 2500);
+      });
+    }
   } catch(e) {}
 })();
