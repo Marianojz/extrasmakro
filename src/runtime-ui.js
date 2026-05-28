@@ -45,18 +45,21 @@
     try { return window.api || null; } catch(e) { return null; }
   }
 
-  function pushActivity(type, message, level = 'INFO') {
+  function pushActivity(type, message, level = 'INFO', options = {}) {
+    const emitRuntime = options.emitRuntime !== false;
     const entry = { type, message, level: level.toUpperCase(), ts: Date.now() };
     activityFeed.unshift(entry);
     if (activityFeed.length > MAX_FEED) activityFeed.length = MAX_FEED;
 
     // Also push to runtime event system if available
-    try {
-      const rt = getRt();
-      if (typeof rt.pushEvent === 'function') {
-        rt.pushEvent({ type, msg: message, level: entry.level, visible: true });
-      }
-    } catch(e) {}
+    if (emitRuntime) {
+      try {
+        const rt = getRt();
+        if (typeof rt.pushEvent === 'function') {
+          rt.pushEvent({ type, msg: message, level: entry.level, visible: true });
+        }
+      } catch(e) {}
+    }
     return entry;
   }
 
@@ -518,7 +521,8 @@
           else if (/DEBUG/.test(type)) level = 'DEBUG';
 
           const msg = ev.msg || ev.type || 'Evento';
-          pushActivity(type, msg, level);
+          // Avoid feedback loop: runtime-originated events should not be re-emitted to runtime.
+          pushActivity(type, msg, level, { emitRuntime: false });
           updateRuntimeBar();
         });
       }
@@ -542,7 +546,8 @@
           if (/ERROR|FAIL|CRITICAL/.test(type)) level = 'ERROR';
           else if (/WARNING|DEGRADED|CONFLICT|RETRY/.test(type)) level = 'WARNING';
           const msg = ev.msg || ev.type || 'Evento';
-          pushActivity(type, msg, level);
+          // Avoid feedback loop: runtime-originated events should not be re-emitted to runtime.
+          pushActivity(type, msg, level, { emitRuntime: false });
           updateRuntimeBar();
         });
       }

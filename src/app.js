@@ -653,6 +653,11 @@ function switchTab(tab) {
     btn.classList.toggle('active', btn.dataset.tab === tab)
   );
   if (tab === 'semana') renderWeekPlanner();
+
+  if (tab === 'dashboard' || tab === 'supervisor' || tab === 'estadisticas') {
+    void runDeferredBootModules('tab:' + tab);
+  }
+
   if (tab === 'dashboard') {
     setTimeout(() => {
       try {
@@ -1229,7 +1234,6 @@ async function mountUI() {
     const runtimeUI = window.__HX_RUNTIME_UI__;
     if (runtimeUI && typeof runtimeUI.mount === 'function') {
       const unmount = runtimeUI.mount();
-      runtimeUI.subscribeToRuntimeEvents();
       // Seed initial activity
       runtimeUI.pushActivity('SYSTEM', 'UI montada', 'INFO');
       runtimeUI.pushActivity('STORAGE', 'Storage: ' + (APP_CONFIG.STORAGE_BACKEND || 'local'), 'INFO');
@@ -4580,11 +4584,14 @@ function paintBootShell() {
   app.innerHTML = '<div class="card" style="margin:20px;max-width:560px"><h3>Iniciando sistema</h3><p class="muted">Cargando núcleo operativo y verificaciones de integridad.</p></div>';
 }
 
-async function runDeferredBootModules() {
+let deferredBootScheduled = false;
+
+async function runDeferredBootModules(reason = 'manual') {
   if (window.__HX_DEFERRED_BOOT_DONE__) return;
   window.__HX_DEFERRED_BOOT_DONE__ = true;
   window.__HX_RUNTIME__ = window.__HX_RUNTIME__ || {};
   window.__HX_RUNTIME__.bootPhases = window.__HX_RUNTIME__.bootPhases || [];
+  window.__HX_RUNTIME__.bootRequestedBy = reason;
 
   const runPhase = async (name, loader) => {
     const startedAt = Date.now();
@@ -4638,6 +4645,26 @@ async function runDeferredBootModules() {
   });
 }
 
+function scheduleDeferredBootModules() {
+  if (deferredBootScheduled || window.__HX_DEFERRED_BOOT_DONE__) return;
+  deferredBootScheduled = true;
+
+  const trigger = () => {
+    void runDeferredBootModules('idle');
+  };
+
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(trigger, { timeout: 2500 });
+  } else {
+    setTimeout(trigger, 1200);
+  }
+
+  // Failsafe: guarantee deferred boot eventually runs in case idle callback is delayed.
+  setTimeout(() => {
+    void runDeferredBootModules('failsafe-timeout');
+  }, 10000);
+}
+
 // --- Inicializacion ----------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -4674,7 +4701,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     renderAlertBar();
-    await runDeferredBootModules();
+    scheduleDeferredBootModules();
 
     debugLog("FASE 3B HARDENING COMPLETADA");
 
